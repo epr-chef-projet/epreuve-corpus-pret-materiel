@@ -1,0 +1,8 @@
+[mcp_servers.laravel-boost]
+command = "./vendor/bin/sail"
+args = ["artisan", "boost:mcp"]
+startup_timeout_sec = 30
+tool_timeout_sec = 60
+
+[mcp_servers.laravel-boost.env]
+BOOST_RULES_ENABLED = "false"

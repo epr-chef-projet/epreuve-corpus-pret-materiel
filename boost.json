@@ -1,0 +1,6 @@
+{
+    "agents": ["codex", "claude_code"],
+    "guidelines": true,
+    "mcp": true,
+    "sail": true
+}

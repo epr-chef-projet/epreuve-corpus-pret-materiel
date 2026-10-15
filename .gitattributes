@@ -1,0 +1,44 @@
+* text=auto eol=lf
+
+*.blade.php diff=html
+*.css diff=css
+*.html diff=html
+*.md diff=markdown
+*.php diff=php
+
+CHANGELOG.md export-ignore
+.github/workflows/browser-tests.yml export-ignore
+
+# Rule sources use explicit byte handling across platforms.
+.ai/guidelines/00-project-socle.md -text !eol
+.ai/rules/index.md -text !eol
+.ai/rules/projet/environnements/laravel-sail.md -text !eol
+.ai/rules/projet/index.md -text !eol
+.ai/rules/projet/livraison/validation-ci-promotion-humaine.md -text !eol
+.ai/rules/socle/01-noyau-agent.md -text !eol
+.ai/rules/socle/02-architecture-modules.md -text !eol
+.ai/rules/socle/03-php-laravel-metier.md -text !eol
+.ai/rules/socle/04-contrats-dto-validation.md -text !eol
+.ai/rules/socle/05-schema-migrations-historique.md -text !eol
+.ai/rules/socle/06-requetes-lectures-cache.md -text !eol
+.ai/rules/socle/07-transactions-concurrence-etats.md -text !eol
+.ai/rules/socle/08-securite-identites-isolation.md -text !eol
+.ai/rules/socle/09-confidentialite-cycle-donnees.md -text !eol
+.ai/rules/socle/10-jobs-evenements-fiabilite.md -text !eol
+.ai/rules/socle/11-temps-reel-synchronisation.md -text !eol
+.ai/rules/socle/12-vue-typescript-inertia.md -text !eol
+.ai/rules/socle/13-interface-accessibilite-internationalisation.md -text !eol
+.ai/rules/socle/14-assets-fichiers-stockage.md -text !eol
+.ai/rules/socle/15-ia-outils-fournisseurs.md -text !eol
+.ai/rules/socle/16-voix-avatar-medias.md -text !eol
+.ai/rules/socle/17-integrations-effets-externes.md -text !eol
+.ai/rules/socle/18-tests-preuves-acceptation.md -text !eol
+.ai/rules/socle/19-performance-observabilite.md -text !eol
+.ai/rules/socle/20-environnement-dependances-qualite.md -text !eol
+.ai/rules/socle/21-livraison-exploitation-reprise.md -text !eol
+.ai/rules/socle/22-erreurs-exceptions.md -text !eol
+docker/bootstrap/Dockerfile -text !eol
+
+# Private working notes and local runtime state are never shared in Git archives.
+project-management/local export-ignore
+.epr-local export-ignore

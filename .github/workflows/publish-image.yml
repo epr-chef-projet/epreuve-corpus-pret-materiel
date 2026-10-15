@@ -1,0 +1,303 @@
+name: Image — publication décidée par C
+
+on:
+    workflow_dispatch:
+        inputs:
+            mode:
+                description: 'Opération ayant reçu son accord distinct'
+                type: choice
+                options: [publish, verify-public]
+                required: true
+            source_sha:
+                description: 'SHA intégré explicitement sélectionné par C'
+                type: string
+                required: true
+            build_run:
+                description: 'Run de base-main ayant produit et reçu cette image'
+                type: string
+                required: true
+            build_attempt:
+                description: 'Tentative du run de construction'
+                type: string
+                required: true
+            archive_sha256:
+                description: 'SHA256 de image.tar.gz reçu et approuvé par C'
+                type: string
+                required: true
+            image_id:
+                description: 'Image ID Docker sha256 reçu et approuvé par C'
+                type: string
+                required: true
+            registry_digest:
+                description: 'Digest publié ; obligatoire pour verify-public'
+                type: string
+                default: ''
+
+permissions:
+    contents: read
+    actions: read
+
+concurrency:
+    group: production-image-publication
+    cancel-in-progress: false
+
+jobs:
+    prepare:
+        runs-on: ubuntu-24.04
+        timeout-minutes: 20
+        outputs:
+            image: ${{ steps.identity.outputs.image }}
+            tag: ${{ steps.identity.outputs.tag }}
+            artifact: ${{ steps.identity.outputs.artifact }}
+        env:
+            GH_TOKEN: ${{ github.token }}
+            SOURCE_SHA: ${{ inputs.source_sha }}
+            BUILD_RUN: ${{ inputs.build_run }}
+            BUILD_ATTEMPT: ${{ inputs.build_attempt }}
+            ARCHIVE_SHA: ${{ inputs.archive_sha256 }}
+            IMAGE_ID: ${{ inputs.image_id }}
+            REGISTRY_DIGEST: ${{ inputs.registry_digest }}
+            MODE: ${{ inputs.mode }}
+        steps:
+            - name: Exiger la sélection C et les preuves GitHub correspondantes
+              id: identity
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  test "$GITHUB_REPOSITORY" = epr-chef-projet/epreuve-corpus-pret-materiel
+                  test "$GITHUB_REF" = refs/heads/main
+                  test "$GITHUB_ACTOR_ID" = 209922291
+                  [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+                  [[ "$BUILD_RUN" =~ ^[0-9]+$ && "$BUILD_ATTEMPT" =~ ^[0-9]+$ ]]
+                  [[ "$ARCHIVE_SHA" =~ ^[a-f0-9]{64}$ && "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]
+                  if [[ "$MODE" = verify-public ]]; then [[ "$REGISTRY_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; fi
+                  gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN/attempts/$BUILD_ATTEMPT" > "$RUNNER_TEMP/run.json"
+                  gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN/attempts/$BUILD_ATTEMPT/jobs?per_page=100" > "$RUNNER_TEMP/jobs.json"
+                  gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+                  python3 - <<'PY'
+                  import json, os, subprocess, hashlib, zipfile
+                  from pathlib import Path
+                  p = Path(os.environ['RUNNER_TEMP'])
+                  run = json.loads((p / 'run.json').read_text())
+                  assert run['event'] == 'push' and run['head_branch'] == 'main'
+                  assert run['path'] == '.github/workflows/base-main.yml'
+                  assert run['head_sha'] == os.environ['SOURCE_SHA'] and run['run_attempt'] == int(os.environ['BUILD_ATTEMPT'])
+                  assert run['status'] == 'completed' and run['conclusion'] == 'success'
+                  assert run['repository']['id'] == int(os.environ['GITHUB_REPOSITORY_ID'])
+                  decoder = json.JSONDecoder()
+                  def pages(name):
+                      data = (p / name).read_text().strip()
+                      while data:
+                          item, end = decoder.raw_decode(data)
+                          yield item
+                          data = data[end:].lstrip()
+                  jobs = [j for page in pages('jobs.json') for j in page['jobs']]
+                  assert len([j for j in jobs if j['name'] == 'base-main' and j['conclusion'] == 'success']) == 1
+                  artifacts = [a for page in pages('artifacts.json') for a in page['artifacts']]
+                  prefix = os.environ['BUILD_RUN'] + '-' + os.environ['BUILD_ATTEMPT']
+                  for kind in ['production-image', 'image-proof', 'base-receipt']:
+                      selected = [a for a in artifacts if a['name'] == kind + '-' + prefix and not a['expired']]
+                      assert len(selected) == 1
+                      a = selected[0]
+                      target = p / (kind + '.zip')
+                      with target.open('wb') as f:
+                          subprocess.run(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/artifacts/' + str(a['id']) + '/zip'], stdout=f, check=True)
+                      assert 'sha256:' + hashlib.sha256(target.read_bytes()).hexdigest() == a['digest']
+                      destination = p / kind
+                      destination.mkdir()
+                      with zipfile.ZipFile(target) as z:
+                          for member in z.infolist():
+                              assert not member.is_dir() and Path(member.filename).name == member.filename
+                              z.extract(member, destination)
+                  receipt = json.loads((p / 'base-receipt' / 'base-receipt.json').read_text())
+                  assert receipt['validated'] is True
+                  assert receipt['sha'] == receipt['expectedSha'] == os.environ['SOURCE_SHA']
+                  assert receipt['run'] == os.environ['BUILD_RUN'] and receipt['attempt'] == os.environ['BUILD_ATTEMPT']
+                  assert all(value == 'success' for value in receipt['stages'].values())
+                  assert all(row['nativeExit'] == 0 for row in receipt['checks']) and len(receipt['checks']) == 11
+                  archive = p / 'production-image' / 'image.tar.gz'
+                  assert hashlib.sha256(archive.read_bytes()).hexdigest() == os.environ['ARCHIVE_SHA']
+                  expected = (p / 'image-proof' / 'archive.sha256').read_text().split()[0]
+                  assert expected == os.environ['ARCHIVE_SHA']
+                  image = json.loads((p / 'image-proof' / 'image-inspect.json').read_text())[0]
+                  assert image['Id'] == os.environ['IMAGE_ID']
+                  assert receipt['imageId'] == os.environ['IMAGE_ID'] and receipt['mediaValidated'] is True
+                  assert receipt['stages']['MEDIA_TESTS'] == 'success'
+                  media = json.loads((p / 'image-proof' / 'media-tests.json').read_text())
+                  pdf = json.loads((p / 'image-proof' / 'pdf-native.json').read_text())
+                  coverage = json.loads((p / 'image-proof' / 'scan-coverage.json').read_text())
+                  for proof in [media, pdf, coverage]:
+                      assert proof['imageId'] == os.environ['IMAGE_ID'] and proof['sourceSha'] == os.environ['SOURCE_SHA']
+                  assert media['nativeExit'] == pdf['nativeExit'] == 0
+                  assert media['files'] == ['tests/Feature/Foundation/ImageEngineTest.php', 'tests/Feature/Foundation/PdfEngineTest.php']
+                  assert pdf['productionDependenciesOnly'] and pdf['embeddedTrueType'] and pdf['scriptsDisabled']
+                  assert hashlib.sha256((p / 'image-proof' / 'pdf-simple.pdf').read_bytes()).hexdigest() == pdf['sha256']
+                  assert coverage['os'] == 'wolfi' and coverage['osPackages'] > 0 and coverage['composerPackages'] > 0
+                  labels = image['Config']['Labels']
+                  assert labels['org.opencontainers.image.revision'] == os.environ['SOURCE_SHA']
+                  assert labels['org.epr.build-run'] == os.environ['BUILD_RUN'] and labels['org.epr.build-attempt'] == os.environ['BUILD_ATTEMPT']
+                  PY
+                  tag="ghcr.io/$GITHUB_REPOSITORY:sha-$SOURCE_SHA-run-$BUILD_RUN-a$BUILD_ATTEMPT"
+                  printf 'image=%s\ntag=%s\nartifact=production-image-%s-%s\n' "$IMAGE_ID" "$tag" "$BUILD_RUN" "$BUILD_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+            - name: Charger sans reconstruction et rapprocher configuration et couches
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  docker load --input "$RUNNER_TEMP/production-image/image.tar.gz"
+                  docker image inspect "$IMAGE_ID" > "$RUNNER_TEMP/loaded.json"
+                  python3 - <<'PY'
+                  import json, os
+                  from pathlib import Path
+                  p = Path(os.environ['RUNNER_TEMP'])
+                  before = json.loads((p / 'image-proof' / 'image-inspect.json').read_text())[0]
+                  after = json.loads((p / 'loaded.json').read_text())[0]
+                  assert before['Id'] == after['Id'] == os.environ['IMAGE_ID']
+                  assert before['Config'] == after['Config'] and before['RootFS'] == after['RootFS']
+                  PY
+
+            - name: Actualiser les publications officielles et le scan de la même image
+              id: scan
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  curl -fsSL 'https://www.php.net/releases/index.php?json&version=8.5' -o "$RUNNER_TEMP/image-proof/php-official.json"
+                  curl -fsSL https://pecl.php.net/rest/r/redis/stable.txt -o "$RUNNER_TEMP/image-proof/redis-official.txt"
+                  curl -fsSL https://pecl.php.net/rest/r/imagick/stable.txt -o "$RUNNER_TEMP/image-proof/imagick-official.txt"
+                  curl -fsSL https://www.php.net/ChangeLog-8.php -o "$RUNNER_TEMP/image-proof/php-publications.html"
+                  curl -fsSL 'https://pecl.php.net/package-changelog.php?package=redis' -o "$RUNNER_TEMP/image-proof/redis-publications.html"
+                  curl -fsSL 'https://pecl.php.net/package-changelog.php?package=imagick' -o "$RUNNER_TEMP/image-proof/imagick-publications.html"
+                  python3 - <<'PY'
+                  import json, os
+                  from pathlib import Path
+                  p = Path(os.environ['RUNNER_TEMP'])
+                  inventory = json.loads((p / 'image-proof' / 'php-inventory.json').read_text())
+                  assert inventory['php'] == json.loads((p / 'image-proof' / 'php-official.json').read_text())['version']
+                  for name in ['redis', 'imagick']:
+                      assert inventory['extensions'][name] == (p / 'image-proof' / (name + '-official.txt')).read_text().strip()
+                  PY
+                  scanner=aquasec/trivy:0.75.0@sha256:9db099105405c648166e6b94155eb32f8da12673cf1f455207f7385cc9a77283
+                  docker pull "$scanner"
+                  mkdir -p "$RUNNER_TEMP/trivy-cache"
+                  trivy=(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/trivy-cache:/root/.cache/trivy" -v "$RUNNER_TEMP:/proof" "$scanner")
+                  "${trivy[@]}" --version > "$RUNNER_TEMP/image-proof/trivy-publication-version.txt"
+                  "${trivy[@]}" image --download-db-only
+                  "${trivy[@]}" image --scanners vuln --format json --output /proof/image-proof/publication-vulnerabilities.json "$IMAGE_ID"
+                  python3 - <<'PYCOVERAGE'
+                  import json, os
+                  from pathlib import Path
+                  root = Path(os.environ['RUNNER_TEMP'])
+                  report = json.loads((root / 'image-proof' / 'publication-vulnerabilities.json').read_text())
+                  inventory = json.loads((root / 'image-proof' / 'php-inventory.json').read_text())
+                  assert report['Metadata']['ImageID'] == os.environ['IMAGE_ID'] and report['Metadata']['OS']['Family'] == 'wolfi'
+                  os_targets = [r for r in report['Results'] if r.get('Class') == 'os-pkgs' and r['Type'] == 'wolfi']
+                  composer = [r for r in report['Results'] if r.get('Class') == 'lang-pkgs' and r['Type'] == 'composer-vendor']
+                  assert len(os_targets) == len(composer) == 1 and composer[0]['Packages']
+                  assert {p['Name']: p['Version'] for p in os_targets[0]['Packages']} == inventory['packages']
+                  assert not any(r.get('IgnoredVulnerabilities') for r in report['Results'])
+                  PYCOVERAGE
+                  set +e
+                  "${trivy[@]}" image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$IMAGE_ID"
+                  vulnerabilities=$?
+                  "${trivy[@]}" image --scanners secret --format json --output /proof/secrets-private.json --exit-code 1 "$IMAGE_ID"
+                  secrets=$?
+                  set -e
+                  cp "$RUNNER_TEMP/trivy-cache/db/metadata.json" "$RUNNER_TEMP/image-proof/trivy-publication-db.json"
+                  printf 'vulnerabilities\t%s\nsecrets\t%s\n' "$vulnerabilities" "$secrets" > "$RUNNER_TEMP/image-proof/publication-scan.tsv"
+                  # Publication HTML is retained for C's current review; versions alone are not a security certificate.
+                  test "$vulnerabilities" = 0 && test "$secrets" = 0
+
+            - name: Conserver le scan actualisé sans les correspondances secrètes
+              if: ${{ always() && steps.scan.outcome != 'skipped' }}
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+              with:
+                  name: publication-image-proof-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ runner.temp }}/image-proof/
+                  retention-days: 90
+                  if-no-files-found: error
+
+    publish:
+        if: ${{ inputs.mode == 'publish' }}
+        needs: prepare
+        environment: publication-ghcr
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+        permissions:
+            contents: read
+            actions: read
+        env:
+            GH_TOKEN: ${{ github.token }}
+            IMAGE_ID: ${{ needs.prepare.outputs.image }}
+            IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+            ARTIFACT: ${{ needs.prepare.outputs.artifact }}
+            BUILD_RUN: ${{ inputs.build_run }}
+            ARCHIVE_SHA: ${{ inputs.archive_sha256 }}
+        steps:
+            - name: Recharger seulement l'archive vérifiée, sans exécuter l'application
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  gh run download "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT" --dir "$RUNNER_TEMP/image"
+                  printf '%s  %s\n' "$ARCHIVE_SHA" "$RUNNER_TEMP/image/image.tar.gz" | sha256sum --check --strict -
+                  docker load --input "$RUNNER_TEMP/image/image.tar.gz"
+                  test "$(docker image inspect --format '{{.Id}}' "$IMAGE_ID")" = "$IMAGE_ID"
+
+            - name: Publier le tag sélectionné sans remplacer un contenu différent
+              shell: bash
+              env:
+                  GHCR_PUBLISH_TOKEN: ${{ secrets.GHCR_PUBLISH_TOKEN }}
+              run: |
+                  set -euo pipefail
+                  test -n "$GHCR_PUBLISH_TOKEN"
+                  printf '%s' "$GHCR_PUBLISH_TOKEN" | docker login ghcr.io --username epr-chef-projet --password-stdin
+                  # A missing tag must be an authenticated 404; network or permission errors do not authorize a push.
+                  python3 - <<'PY'
+                  import os, urllib.request, urllib.error, json, base64
+                  repo = os.environ['GITHUB_REPOSITORY']
+                  auth = base64.b64encode(('epr-chef-projet:' + os.environ['GHCR_PUBLISH_TOKEN']).encode()).decode()
+                  req = urllib.request.Request('https://ghcr.io/token?service=ghcr.io&scope=repository:' + repo + ':pull', headers={'Authorization': 'Basic ' + auth})
+                  token = json.load(urllib.request.urlopen(req, timeout=30))['token']
+                  tag = os.environ['IMAGE_TAG'].split(':')[-1]
+                  req = urllib.request.Request('https://ghcr.io/v2/' + repo + '/manifests/' + tag, headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json'})
+                  try:
+                      manifest = json.load(urllib.request.urlopen(req, timeout=30))
+                      assert manifest['config']['digest'] == os.environ['IMAGE_ID'], 'Existing tag has different content'
+                  except urllib.error.HTTPError as error:
+                      if error.code != 404: raise
+                  PY
+                  docker tag "$IMAGE_ID" "$IMAGE_TAG"
+                  docker push "$IMAGE_TAG"
+                  docker buildx imagetools inspect "$IMAGE_TAG" >> "$GITHUB_STEP_SUMMARY"
+                  docker logout ghcr.io
+                  printf '\nPackage visibility must be received before verify-public; no D admission.\n' >> "$GITHUB_STEP_SUMMARY"
+
+    verify-public:
+        if: ${{ inputs.mode == 'verify-public' }}
+        needs: prepare
+        uses: ./.github/workflows/base-common.yml
+        with:
+            source_sha: ${{ inputs.source_sha }}
+            image_ref: ghcr.io/epr-chef-projet/epreuve-corpus-pret-materiel@${{ inputs.registry_digest }}
+            image_id: ${{ inputs.image_id }}
+            store_archive: false
+
+    received-public:
+        if: ${{ always() && inputs.mode == 'verify-public' }}
+        needs: [prepare, verify-public]
+        runs-on: ubuntu-24.04
+        timeout-minutes: 3
+        env:
+            RESULT: ${{ needs.verify-public.result }}
+            VALIDATED: ${{ needs.verify-public.outputs.validated }}
+            ACTUAL_SHA: ${{ needs.verify-public.outputs.sha }}
+            EXPECTED_SHA: ${{ inputs.source_sha }}
+            ACTUAL_RUN: ${{ needs.verify-public.outputs.run }}
+            ACTUAL_ATTEMPT: ${{ needs.verify-public.outputs.attempt }}
+        steps:
+            - name: Exiger la réception réelle de l'image publique
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  test "$RESULT" = success && test "$VALIDATED" = true
+                  test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+                  test "$ACTUAL_RUN" = "$GITHUB_RUN_ID" && test "$ACTUAL_ATTEMPT" = "$GITHUB_RUN_ATTEMPT"

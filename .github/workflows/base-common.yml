@@ -1,0 +1,744 @@
+name: Contrôles natifs de la base
+
+on:
+    workflow_call:
+        inputs:
+            source_sha:
+                type: string
+                default: ''
+            image_ref:
+                type: string
+                default: ''
+            image_id:
+                type: string
+                default: ''
+            store_archive:
+                type: boolean
+                default: false
+        outputs:
+            validated:
+                value: ${{ jobs.native.outputs.validated }}
+            sha:
+                value: ${{ jobs.native.outputs.sha }}
+            run:
+                value: ${{ jobs.native.outputs.run }}
+            attempt:
+                value: ${{ jobs.native.outputs.attempt }}
+
+permissions:
+    contents: read
+    actions: read
+
+jobs:
+    native:
+        runs-on: ubuntu-24.04
+        timeout-minutes: 45
+        outputs:
+            validated: ${{ steps.receipt.outputs.validated }}
+            sha: ${{ steps.receipt.outputs.sha }}
+            run: ${{ steps.receipt.outputs.run }}
+            attempt: ${{ steps.receipt.outputs.attempt }}
+        env:
+            EPR_RUN: gh-${{ github.run_id }}-${{ github.run_attempt }}
+            EXPECTED_SOURCE: ${{ inputs.source_sha || github.sha }}
+            PUBLIC_IMAGE: ${{ inputs.image_ref }}
+            EXPECTED_IMAGE_ID: ${{ inputs.image_id }}
+            EPR_IMAGE: epr-production:gh-${{ github.run_id }}-${{ github.run_attempt }}
+        defaults:
+            run:
+                shell: bash
+        steps:
+            - name: Obtenir la révision attendue
+              id: checkout
+              uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+              with:
+                  ref: ${{ inputs.source_sha || github.sha }}
+                  persist-credentials: false
+
+            - name: Vérifier le runner et la copie neuve
+              run: |
+                  test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+                  test -z "$(git status --porcelain)"
+                  test ! -e .env
+                  test ! -e .epr-local
+                  docker info --format '{{.ServerVersion}}'
+                  docker compose version
+                  test "$(docker context show)" = default
+
+            - name: Télécharger les services aux références Compose
+              id: images
+              timeout-minutes: 10
+              run: |
+                  docker pull postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+                  docker pull redis:8.2-alpine@sha256:b51665e66f00759be7c3152ad5ac3c66fb2f619c13ef62dea7cc1f9914524635
+                  docker pull axllent/mailpit@sha256:c076638db1e15662150be4fb62b8a6e96ef6ba5bde90c838a0239225854830f7
+
+            - name: Préparer la configuration, le runtime et les locks
+              id: bootstrap
+              run: |
+                  scripts/bootstrap --instance c --run "$EPR_RUN"
+                  docker compose build laravel.test
+                  docker compose run --rm --no-deps --pull never --user "$(id -u):$(id -g)" --entrypoint composer laravel.test install --no-scripts --no-plugins --no-interaction
+                  docker compose -f compose.yaml -f compose.bootstrap.yaml up -d --wait --wait-timeout 90 --no-build --pull never laravel.test pgsql redis mailpit
+                  ./vendor/bin/sail composer dump-autoload --no-scripts --no-interaction
+                  ./vendor/bin/sail npm ci --ignore-scripts --engine-strict
+                  ./vendor/bin/sail composer check-platform-reqs
+                  ./vendor/bin/sail artisan package:discover --no-interaction
+                  for database in laravel testing; do
+                    ./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$database" migrator tinker --execute '
+                    $identity = DB::selectOne("select session_user, current_user, current_database() as database, current_schema() as schema, host(inet_server_addr()) as address");
+                    if (app()->configurationIsCached() || app()->environment() !== "local" || $identity->session_user !== "epr_migrator" || $identity->current_user !== "epr_owner" || $identity->database !== getenv("DB_DATABASE") || $identity->schema !== "epr" || !in_array($identity->address, gethostbynamel("pgsql") ?: [], true)) { throw new RuntimeException("Migration target refused"); }
+                    dump($identity);'
+                    ./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$database" migrator migrate --no-interaction
+                    ./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$database" migrator tinker --execute '
+                    if (DB::select("select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_roles r on r.oid=c.relowner where n.nspname=? and c.relkind in (?,?,?,?,?) and r.rolname <> ?", ["epr", "r", "p", "S", "v", "m", "epr_owner"])) { throw new RuntimeException("Unexpected SQL object owner"); }'
+                  done
+                  ./vendor/bin/sail composer contracts:generate
+                  ./vendor/bin/sail composer test:contracts
+                  ./vendor/bin/sail npm run build
+                  runtime=$(sed -n 's/^EPR_RUNTIME_IMAGE="\(.*\)"$/\1/p' .env)
+                  source=$(sed -n 's/^EPR_RUNTIME_SOURCE="\(.*\)"$/\1/p' .env)
+                  printf 'root=%s\nproject=%s\nimage=%s\nsource=%s\n' \
+                    "$(printf '%s' "$PWD" | sha256sum | cut -d ' ' -f 1)" "epr-test-c-$EPR_RUN" \
+                    "$(docker image inspect --format '{{.Id}}' "$runtime")" "$source" > .epr-local/runtime
+
+            - name: Démarrer les huit services
+              id: start
+              run: ./vendor/bin/sail up -d --wait --wait-timeout 90 --no-build --pull never
+
+            - name: Exécuter les onze contrôles existants
+              id: check
+              run: |
+                  mkdir -p .epr-local
+                  : > .epr-local/checks.tsv
+                  mapfile -t commands < <(./vendor/bin/sail php -r 'echo implode("\n", json_decode(file_get_contents("composer.json"), true, 512, JSON_THROW_ON_ERROR)["scripts"]["ci:check"]);')
+                  names=(composer platform pint phpstan contracts types lint format build composer-audit npm-audit)
+                  test "${#commands[@]}" = "${#names[@]}"
+                  result=0
+                  for index in "${!commands[@]}"; do
+                    command="${commands[index]/#@composer/composer}"
+                    read -r -a arguments <<< "$command"
+                    case "${arguments[0]}" in
+                      composer|npm) prefix=();;
+                      pint|phpstan) prefix=(bin);;
+                      *) exit 3;;
+                    esac
+                    set +e
+                    ./vendor/bin/sail "${prefix[@]}" "${arguments[@]}"
+                    native=$?
+                    set -e
+                    printf '%s\t%s\n' "${names[index]}" "$native" >> .epr-local/checks.tsv
+                    if [[ "$native" != 0 && "$result" == 0 ]]; then result="$native"; fi
+                  done
+                  exit "$result"
+
+            - name: Exécuter les tests PHP, Vue et navigateur
+              id: tests
+              timeout-minutes: 10
+              run: |
+                  ./vendor/bin/sail composer test:contracts -- --check
+                  ./vendor/bin/sail artisan test --compact
+                  ./vendor/bin/sail npm run test:unit
+                  ./vendor/bin/sail npm exec --no -- playwright install chromium
+                  ./vendor/bin/sail npm run test:browser
+
+            - name: Construire ou récupérer le livrable exact
+              id: image
+              timeout-minutes: 20
+              run: |
+                  mkdir -p "$RUNNER_TEMP/image-context" "$RUNNER_TEMP/image-proof"
+                  ./vendor/bin/sail exec -T laravel.test cat /usr/bin/composer > "$RUNNER_TEMP/composer.phar"
+                  chmod 0644 "$RUNNER_TEMP/composer.phar"
+                  if [[ -z "$PUBLIC_IMAGE" ]]; then
+                    git archive "$EXPECTED_SOURCE" | tar -x --no-same-owner --same-permissions -C "$RUNNER_TEMP/image-context"
+                    builder=$(sed -n 's/^EPR_RUNTIME_IMAGE="\(.*\)"$/\1/p' .env)
+                    test -n "$builder"
+                    builder_id=$(docker image inspect --format '{{.Id}}' "$builder")
+                    test "$builder_id" = "$(sed -n 's/^image=//p' .epr-local/runtime)"
+                    test "$(docker image inspect --format '{{index .Config.Labels "org.epr.runtime-source"}}' "$builder")" = "$(sed -n 's/^source=//p' .epr-local/runtime)"
+                    recipe=$(python3 - <<'PYRECIPE'
+                  import hashlib, json, os
+                  from pathlib import Path
+                  root = Path(os.environ['RUNNER_TEMP'])
+                  files = ['.dockerignore', 'docker/production/Dockerfile', 'docker/production/php.ini', 'docker/production/php-fpm.conf', 'docker/production/nginx.conf', 'docker/production/entrypoint.sh', 'docker/imagick/policy.xml']
+                  hashes = {name: hashlib.sha256((root / 'image-context' / name).read_bytes()).hexdigest() for name in files}
+                  recipe = hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+                  (root / 'image-proof' / 'recipe.json').write_text(json.dumps({'sourceSha': os.environ['EXPECTED_SOURCE'], 'files': hashes, 'recipeSha256': recipe}, indent=2) + '\n')
+                  print(recipe)
+                  PYRECIPE
+                    )
+                    printf 'builder=%s\nimageId=%s\n' "$builder" "$builder_id" > "$RUNNER_TEMP/image-proof/frontend-builder.txt"
+                    docker buildx build --platform linux/amd64 --load --provenance=false \
+                      --file "$RUNNER_TEMP/image-context/docker/production/Dockerfile" \
+                      --build-arg "FRONTEND_BUILD_IMAGE=$builder" --build-arg "RECIPE_SHA256=$recipe" \
+                      --build-arg "SOURCE_SHA=$EXPECTED_SOURCE" --build-arg "BUILD_RUN=$GITHUB_RUN_ID" \
+                      --build-arg "BUILD_ATTEMPT=$GITHUB_RUN_ATTEMPT" --tag "$EPR_IMAGE" "$RUNNER_TEMP/image-context"
+                  else
+                    [[ "$PUBLIC_IMAGE" =~ ^ghcr.io/epr-chef-projet/epreuve-corpus-pret-materiel@sha256:[a-f0-9]{64}$ ]]
+                    mkdir -p "$RUNNER_TEMP/anonymous-docker"
+                    DOCKER_CONFIG="$RUNNER_TEMP/anonymous-docker" docker pull --platform linux/amd64 "$PUBLIC_IMAGE"
+                    test "$(docker image inspect --format '{{.Id}}' "$PUBLIC_IMAGE")" = "$EXPECTED_IMAGE_ID"
+                    docker tag "$PUBLIC_IMAGE" "$EPR_IMAGE"
+                  fi
+                  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$EPR_IMAGE")" = "$EXPECTED_SOURCE"
+                  docker image inspect "$EPR_IMAGE" > "$RUNNER_TEMP/image-proof/image-inspect.json"
+                  export QUALIFIED_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$EPR_IMAGE")
+                  printf 'QUALIFIED_IMAGE_ID=%s\n' "$QUALIFIED_IMAGE_ID" >> "$GITHUB_ENV"
+                  docker run --rm --entrypoint php "$EPR_IMAGE" -r '
+                  $extensions = [];
+                  foreach (get_loaded_extensions() as $name) { $extensions[$name] = phpversion($name); }
+                  ksort($extensions);
+                  $packages = [];
+                  foreach (explode("\n\n", file_get_contents("/usr/lib/apk/db/installed")) as $entry) {
+                      if (preg_match("~^P:(.+)$~m", $entry, $name) && preg_match("~^V:(.+)$~m", $entry, $version)) { $packages[$name[1]] = $version[1]; }
+                  }
+                  ksort($packages);
+                  foreach ($packages as $name => $version) { if (str_starts_with($name, "nginx-stable")) { exit(1); } }
+                  foreach (["nginx-mainline", "nginx-mainline-config", "nginx-mainline-fastcgi-params", "nginx-mainline-mime-types", "nginx-mainline-scgi-params", "nginx-mainline-uwsgi-params"] as $name) { if (($packages[$name] ?? null) !== "1.31.6-r3") { exit(1); } }
+                  echo json_encode(["php" => PHP_VERSION, "extensions" => $extensions, "packages" => $packages], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n";
+                  ' > "$RUNNER_TEMP/image-proof/php-inventory.json"
+                  docker run --rm --entrypoint sh "$EPR_IMAGE" -ec '
+                    test "$(id -u)" = 10001
+                    test ! -e .env && test ! -e public/hot && test ! -e vendor/laravel/boost && test ! -e vendor/laravel/sail
+                    test ! -e vendor/pestphp && test ! -e node_modules && test ! -e .epr-local
+                    test -z "$(find bootstrap/cache -type f)"
+                    ! command -v node && ! command -v npm && ! command -v composer
+                    php-fpm -tt
+                  '
+                  docker run --rm --entrypoint php --mount "type=bind,src=$RUNNER_TEMP/composer.phar,dst=/tmp/composer,readonly" "$EPR_IMAGE" /tmp/composer check-platform-reqs --no-dev
+
+                  docker run --rm --network none --read-only --tmpfs /tmp:uid=10001,gid=10001,mode=0700 --entrypoint php "$EPR_IMAGE" -r '
+                  $proof = ["memoryLimit" => (int) Imagick::getResourceLimit(Imagick::RESOURCETYPE_MEMORY), "allowedEncoders" => [], "rejections" => []];
+                  if ($proof["memoryLimit"] !== 134217728) { exit(3); }
+                  foreach (["JPEG", "PNG", "WEBP"] as $format) {
+                      $image = new Imagick(); $image->newImage(1, 1, "white"); $image->setImageFormat($format);
+                      if ($image->getImageBlob() === "") { exit(4); }
+                      $proof["allowedEncoders"][] = $format; $image->clear();
+                  }
+                  foreach (["MSL", "TIFF"] as $format) {
+                      try { (new Imagick())->readImage($format.":/dev/null"); exit(1); }
+                      catch (ImagickException $e) {
+                          if (!str_contains($e->getMessage(), "security policy") || !str_contains($e->getMessage(), $format)) { fwrite(STDERR, $e->getMessage()."\n"); exit(2); }
+                          $proof["rejections"][$format] = $e->getMessage();
+                      }
+                  }
+                  echo json_encode($proof, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n";
+                  ' > "$RUNNER_TEMP/image-proof/imagick-policy.json"
+
+                  docker run --rm -i --network none --read-only --entrypoint php "$QUALIFIED_IMAGE_ID" <<'PHPELF' > "$RUNNER_TEMP/image-proof/elf.json"
+                  <?php
+                  $paths=array_merge(["/usr/sbin/php","/usr/sbin/php-fpm","/usr/sbin/nginx"],glob("/usr/lib/php/modules/*.so"));$results=[];
+                  foreach($paths as $path){$cmd=["/lib/ld-linux-x86-64.so.2","--list",$path];$pipes=[];$proc=proc_open($cmd,[1=>["pipe","w"],2=>["pipe","w"]],$pipes);$stdout=stream_get_contents($pipes[1]);$stderr=stream_get_contents($pipes[2]);fclose($pipes[1]);fclose($pipes[2]);$code=proc_close($proc);$results[]=["path"=>$path,"command"=>$cmd,"nativeCode"=>$code,"stdout"=>$stdout,"stderr"=>$stderr];if($code!==0||str_contains($stdout.$stderr,"not found")){fwrite(STDERR,json_encode($results));exit(1);}}
+                  echo json_encode($results, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n";
+                  PHPELF
+                  docker run --rm --read-only --entrypoint curl "$QUALIFIED_IMAGE_ID" --fail --silent --show-error --max-time 30 'https://www.php.net/releases/index.php?json&version=8.5' > "$RUNNER_TEMP/image-proof/https-cli.json"
+                  docker run --rm --read-only --entrypoint php "$QUALIFIED_IMAGE_ID" -r '
+                  $data = file_get_contents("https://www.php.net/releases/index.php?json&version=8.5"); if ($data === false) { exit(1); }
+                  echo $data;
+                  ' > "$RUNNER_TEMP/image-proof/https-php.json"
+                  python3 - <<'PYCOMPONENTS'
+                  import hashlib, json, os, subprocess, textwrap
+                  from pathlib import Path
+                  root = Path(os.environ['RUNNER_TEMP'])
+                  archive = root / 'image-filesystem.tar'
+                  name = 'epr-image-inventory-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
+                  create = ['docker', 'create', '--name', name, '--network', 'none', '--read-only', '--entrypoint', 'php', os.environ['QUALIFIED_IMAGE_ID'], '-r', 'exit(0);']
+                  cid = subprocess.check_output(create, text=True).strip()
+                  export = ['docker', 'export', '--output', str(archive), cid]
+                  try:
+                      container = json.loads(subprocess.check_output(['docker', 'inspect', cid]))[0]
+                      assert container['Image'] == os.environ['QUALIFIED_IMAGE_ID'] and not container['Mounts'] and not container['State']['Running']
+                      subprocess.run(export, check=True)
+                  finally:
+                      subprocess.run(['docker', 'rm', cid], check=True)
+                  archive_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+                  code = textwrap.dedent(r'''
+                      import json, re, sys, tarfile
+                      from pathlib import PurePosixPath
+                      with tarfile.open(sys.argv[1]) as tar:
+                          members = tar.getmembers()
+                          names = [m.name.lstrip('./') for m in members]
+                          selectors = {
+                              'systemd-homed': lambda n: PurePosixPath(n).name in ['systemd-homed', 'systemd-homework', 'homectl'],
+                              'tiffcrop': lambda n: PurePosixPath(n).name == 'tiffcrop',
+                              'libxml-python': lambda n: bool(re.match(r'libxml2mod.*\.so$', PurePosixPath(n).name)) or PurePosixPath(n).name == 'libxml2.py',
+                              'perl-archive-tar': lambda n: n.endswith('Archive/Tar.pm'),
+                          }
+                          component = sys.argv[2]
+                          matches = [n for n in names if selectors[component](n)]
+                          interpreters = [n for n in names if re.fullmatch(r'python(?:[0-9].*)?|perl(?:[0-9].*)?', PurePosixPath(n).name)]
+                          owners = []
+                          apk = tar.extractfile(next(m for m in members if m.name.lstrip('./') == 'usr/lib/apk/db/installed')).read().decode()
+                          for block in apk.split('\n\n'):
+                              values, directory = {}, ''
+                              for line in block.splitlines():
+                                  if line.startswith('P:'): values['package'] = line[2:]
+                                  if line.startswith('V:'): values['version'] = line[2:]
+                                  if line.startswith('F:'): directory = line[2:]
+                                  if line.startswith('R:') and directory + '/' + line[2:] in matches:
+                                      owners.append({**values, 'path': directory + '/' + line[2:]})
+                          print(json.dumps({'component': component, 'matches': matches, 'absent': not matches, 'interpreters': interpreters, 'packageOwners': owners, 'filesystemEntries': len(members)}))
+                          if component == 'tiffcrop':
+                              assert matches == ['usr/bin/tiffcrop'] and owners == [{'package': 'tiff', 'version': '4.7.2-r3', 'path': 'usr/bin/tiffcrop'}]
+                          else:
+                              assert not matches
+                              if component in ['libxml-python', 'perl-archive-tar']: assert not interpreters
+                  ''')
+                  for component in ['systemd-homed', 'tiffcrop', 'libxml-python', 'perl-archive-tar']:
+                      command = ['python3', '-c', code, str(archive), component]
+                      completed = subprocess.run(command, text=True, capture_output=True)
+                      proof = {'component': component, 'imageId': os.environ['QUALIFIED_IMAGE_ID'], 'sourceSha': os.environ['EXPECTED_SOURCE'], 'createCommand': create, 'exportCommand': export, 'archiveSha256': archive_sha, 'command': command, 'stdout': completed.stdout, 'stderr': completed.stderr, 'nativeExit': completed.returncode}
+                      (root / 'image-proof' / ('component-' + component + '.json')).write_text(json.dumps(proof, indent=2) + '\n')
+                      assert completed.returncode == 0, component
+                  PYCOMPONENTS
+
+            - name: Vérifier les publications PHP et extensions et scanner cette image
+              id: scan
+              timeout-minutes: 10
+              run: |
+                  curl -fsSL 'https://www.php.net/releases/index.php?json&version=8.5' -o "$RUNNER_TEMP/image-proof/php-official.json"
+                  curl -fsSL https://pecl.php.net/rest/r/redis/stable.txt -o "$RUNNER_TEMP/image-proof/redis-official.txt"
+                  curl -fsSL https://pecl.php.net/rest/r/imagick/stable.txt -o "$RUNNER_TEMP/image-proof/imagick-official.txt"
+                  curl -fsSL https://www.php.net/releases/8_5_11.php -o "$RUNNER_TEMP/image-proof/php-publication.html"
+                  curl -fsSL https://pecl.php.net/package-changelog.php?package=redis -o "$RUNNER_TEMP/image-proof/redis-publication.html"
+                  curl -fsSL https://pecl.php.net/package-changelog.php?package=imagick -o "$RUNNER_TEMP/image-proof/imagick-publication.html"
+                  python3 - <<'PYTHON'
+                  import json, os
+                  from pathlib import Path
+                  p = Path(os.environ['RUNNER_TEMP']) / 'image-proof'
+                  inventory = json.loads((p / 'php-inventory.json').read_text())
+                  assert inventory['php'] == json.loads((p / 'php-official.json').read_text())['version']
+                  for name in ['redis', 'imagick']:
+                      assert inventory['extensions'][name] == (p / (name + '-official.txt')).read_text().strip()
+                  PYTHON
+                  scanner=aquasec/trivy:0.75.0@sha256:9db099105405c648166e6b94155eb32f8da12673cf1f455207f7385cc9a77283
+                  docker pull "$scanner"
+                  docker run --rm "$scanner" --version > "$RUNNER_TEMP/image-proof/trivy-version.txt"
+                  mkdir -p "$RUNNER_TEMP/trivy-cache"
+                  trivy=(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/trivy-cache:/root/.cache/trivy" -v "$RUNNER_TEMP:/proof" "$scanner")
+                  "${trivy[@]}" image --download-db-only
+                  "${trivy[@]}" image --scanners vuln --format json --output /proof/image-proof/vulnerabilities.json "$EPR_IMAGE"
+                  "${trivy[@]}" image --scanners vuln --format cyclonedx --output /proof/image-proof/sbom.json "$EPR_IMAGE"
+                  python3 - <<'PYCOVERAGE'
+                  import json, os
+                  from pathlib import Path
+                  root = Path(os.environ['RUNNER_TEMP']) / 'image-proof'
+                  report = json.loads((root / 'vulnerabilities.json').read_text())
+                  image = json.loads((root / 'image-inspect.json').read_text())[0]
+                  inventory = json.loads((root / 'php-inventory.json').read_text())
+                  assert report['Metadata']['ImageID'] == image['Id'] and report['Metadata']['OS']['Family'] == 'wolfi'
+                  os_targets = [r for r in report['Results'] if r.get('Class') == 'os-pkgs' and r['Type'] == 'wolfi']
+                  composer = [r for r in report['Results'] if r.get('Class') == 'lang-pkgs' and r['Type'] == 'composer-vendor']
+                  assert len(os_targets) == len(composer) == 1 and composer[0]['Packages']
+                  assert {p['Name']: p['Version'] for p in os_targets[0]['Packages']} == inventory['packages']
+                  assert not any(r.get('IgnoredVulnerabilities') for r in report['Results'])
+                  counts = {severity: 0 for severity in ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']}
+                  for result in report['Results']:
+                      for vulnerability in result.get('Vulnerabilities', []): counts[vulnerability['Severity']] += 1
+                  (root / 'scan-coverage.json').write_text(json.dumps({'imageId': image['Id'], 'sourceSha': os.environ['EXPECTED_SOURCE'], 'os': 'wolfi', 'osPackages': len(inventory['packages']), 'composerPackages': len(composer[0]['Packages']), 'severityCounts': counts}, indent=2) + '\n')
+                  PYCOVERAGE
+                  set +e
+                  "${trivy[@]}" image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$EPR_IMAGE"
+                  vulnerabilities=$?
+                  "${trivy[@]}" image --scanners secret --format json --output /proof/secrets-private.json --exit-code 1 "$EPR_IMAGE"
+                  secrets=$?
+                  set -e
+                  cp "$RUNNER_TEMP/trivy-cache/db/metadata.json" "$RUNNER_TEMP/image-proof/trivy-db.json"
+                  printf 'vulnerabilities\t%s\nsecrets\t%s\n' "$vulnerabilities" "$secrets" > "$RUNNER_TEMP/image-proof/scan.tsv"
+                  test "$vulnerabilities" = 0 && test "$secrets" = 0
+
+            - name: Exécuter les deux fichiers médias existants sous Wolfi
+              id: media_tests
+              timeout-minutes: 5
+              run: |
+                  export QUALIFIED_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$EPR_IMAGE")
+                  python3 - <<'PYMEDIA'
+                  import hashlib, json, os, subprocess
+                  from pathlib import Path
+                  root = Path(os.environ['RUNNER_TEMP'])
+                  project = 'epr-test-c-' + os.environ['EPR_RUN']
+                  network = project + '_sail'
+                  cid = subprocess.check_output(['docker', 'ps', '-q', '--filter', 'label=com.docker.compose.project=' + project, '--filter', 'label=com.docker.compose.service=pgsql'], text=True).strip()
+                  container = json.loads(subprocess.check_output(['docker', 'inspect', cid]))[0]
+                  assert container['Config']['Labels']['com.docker.compose.project.working_dir'] == str(Path.cwd())
+                  address = container['NetworkSettings']['Networks'][network]['IPAddress']
+                  assert address and container['State']['Health']['Status'] == 'healthy'
+                  empty = root / 'empty-test.env'
+                  empty.write_text('')
+                  empty.chmod(0o444)
+                  files = ['tests/Feature/Foundation/ImageEngineTest.php', 'tests/Feature/Foundation/PdfEngineTest.php']
+                  command = ['docker', 'run', '--rm', '--network', network, '--user', '10001:10001', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+                             '--tmpfs', '/tmp:uid=10001,gid=10001,mode=0700', '--tmpfs', '/var/www/html/bootstrap/cache:uid=10001,gid=10001,mode=0700', '--tmpfs', '/var/www/html/storage:uid=10001,gid=10001,mode=0700',
+                             '--tmpfs', '/var/www/html/vendor/pestphp/pest-plugin-mutate/.temp:uid=10001,gid=10001,mode=0700',
+                             '--mount', 'type=bind,src=' + str(Path.cwd() / 'vendor') + ',dst=/var/www/html/vendor,readonly',
+                             '--mount', 'type=bind,src=' + str(Path.cwd() / 'tests') + ',dst=/var/www/html/tests,readonly',
+                             '--mount', 'type=bind,src=' + str(Path.cwd() / 'phpunit.xml') + ',dst=/var/www/html/phpunit.xml,readonly',
+                             '--mount', 'type=bind,src=' + str(empty) + ',dst=/var/www/html/.env,readonly',
+                             '--env-file', str(Path.cwd() / '.env'), '-e', 'APP_ENV=testing', '-e', 'APP_DEBUG=false', '-e', 'DB_DATABASE=testing',
+                             '-e', 'CACHE_STORE=array', '-e', 'SESSION_DRIVER=array',
+                             '--entrypoint', '/bin/sh', os.environ['QUALIFIED_IMAGE_ID'], '-c',
+                             'mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/fonts && exec php vendor/bin/pest --colors=never --cache-directory=/tmp/phpunit-cache --fail-on-warning --fail-on-risky --fail-on-incomplete --fail-on-skipped ' + ' '.join(files)]
+                  with (root / 'image-proof' / 'media-tests.log').open('w') as log:
+                      completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+                  proof = {'imageId': os.environ['QUALIFIED_IMAGE_ID'], 'sourceSha': os.environ['EXPECTED_SOURCE'], 'files': files, 'filesSha256': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in files},
+                           'command': command, 'nativeExit': completed.returncode, 'profile': 'same final Wolfi image; dev vendor and existing files only in transient read-only mounts; dedicated testing database and restricted SQL identity'}
+                  (root / 'image-proof' / 'media-tests.json').write_text(json.dumps(proof, indent=2) + '\n')
+                  print((root / 'image-proof' / 'media-tests.log').read_text())
+                  assert completed.returncode == 0
+                  PYMEDIA
+
+            - name: Recevoir les cinq rôles depuis la même image
+              id: image_check
+              timeout-minutes: 5
+              run: |
+                  ./vendor/bin/sail stop -t 90 laravel.test vite horizon reverb scheduler
+                  ./vendor/bin/sail --profile tools run --rm --no-deps -T --user "$(id -u):$(id -g)" --entrypoint php laravel.test -r '
+                  require "vendor/autoload.php";
+                  $source = Dotenv\Dotenv::parse(file_get_contents(".env"));
+                  $values = ["IMAGE_APP_KEY" => $source["APP_KEY"], "IMAGE_DB_PASSWORD" => $source["DB_PASSWORD"],
+                    "IMAGE_INSTANCE" => $source["EPR_INSTANCE"], "IMAGE_ROOT_FINGERPRINT" => $source["EPR_ROOT_FINGERPRINT"], "IMAGE_APP_URL" => "http://image.invalid:8183",
+                    "IMAGE_PUBLIC_HOST" => "image.invalid", "IMAGE_HTTP_PORT" => "8183", "IMAGE_REVERB_PORT" => "8193",
+                    "IMAGE_REVERB_KEY" => "image-qualification", "IMAGE_REVERB_SECRET" => bin2hex(random_bytes(32))];
+                  $lines = [];
+                  foreach ($values as $name => $value) { $lines[] = $name."=".json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); }
+                  file_put_contents(".epr-local/image.env", implode("\n", $lines)."\n");
+                  chmod(".epr-local/image.env", 0600);
+                  '
+                  project="epr-test-c-$EPR_RUN"
+                  image_compose=(docker compose --env-file .epr-local/image.env -p "$project" -f compose.image-check.yaml)
+                  "${image_compose[@]}" up -d --wait --wait-timeout 90 --no-build --pull never
+                  "${image_compose[@]}" exec -T php php scripts/epr-probe.php
+                  "${image_compose[@]}" exec -T image-horizon php artisan horizon:status
+                  for path in / /login /up; do
+                    curl --fail --silent --output /dev/null -H 'Host: image.invalid:8183' "http://127.0.0.1:8183$path"
+                  done
+                  for path in /.env /composer.json /vendor/autoload.php /horizon /horizon/api/stats; do
+                    status=$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Host: image.invalid:8183' "http://127.0.0.1:8183$path")
+                    [[ "$status" = 403 || "$status" = 404 ]]
+                  done
+                  "${image_compose[@]}" exec -T php php -r '
+                  $manifest = json_decode(file_get_contents("public/build/manifest.json"), true, 512, JSON_THROW_ON_ERROR);
+                  $files = [];
+                  foreach ($manifest as $entry) {
+                    foreach (array_merge([$entry["file"]], $entry["css"] ?? [], $entry["assets"] ?? []) as $file) { $files[$file] = true; }
+                  }
+                  foreach (array_keys($files) as $file) {
+                    if (!is_file("public/build/".$file)) { exit(1); }
+                    $headers = get_headers("http://web:8080/build/".$file);
+                    if (!$headers || !str_contains($headers[0], "200")) { exit(1); }
+                  }
+                  $context = stream_context_create(["http" => ["header" => "Host: image.invalid:8183\r\n"]]);
+                  $html = file_get_contents("http://web:8080/login", false, $context);
+                  if ($html === false || !preg_match_all("~(?:src|href)=\"([^\"]*/build/[^\"]+)\"~", $html, $urls)) { exit(1); }
+                  foreach ($urls[1] as $url) { if (!str_starts_with($url, "http://image.invalid:8183/build/")) { exit(1); } }
+                  echo count($files)." assets served, public entry URLs received\n";
+                  '
+                  export QUALIFIED_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$EPR_IMAGE")
+                  "${image_compose[@]}" exec -T -e "EPR_IMAGE_ID=$QUALIFIED_IMAGE_ID" -e "EPR_SOURCE_SHA=$EXPECTED_SOURCE" php php <<'PHPPDF' > "$RUNNER_TEMP/image-proof/pdf-native.json"
+                  <?php
+                  require "vendor/autoload.php";
+                  $app = require "bootstrap/app.php";
+                  $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+                  foreach (["enable_php", "enable_javascript", "enable_remote"] as $option) {
+                      if (config("dompdf.options.".$option) !== false) { throw new RuntimeException("Unsafe PDF option: ".$option); }
+                  }
+                  foreach ([storage_path("fonts"), storage_path("app/private/pdf-assets")] as $directory) {
+                      if (!is_dir($directory) && !mkdir($directory, 0700, true)) { throw new RuntimeException("PDF directory unavailable"); }
+                  }
+                  $html = '<html><head><meta charset="utf-8"><style>body{font-family:DejaVu Sans;font-size:12pt}</style></head><body><h1>Prêt — Loan</h1><p>Équipement à vérifier : café, € et £.</p></body></html>';
+                  $document = Barryvdh\DomPDF\Facade\Pdf::loadHTML($html)->setPaper("a4");
+                  $bytes = $document->output();
+                  preg_match_all("~/BaseFont\s*/([^\s]+)~", $bytes, $fontMatches);
+                  $fonts = array_values(array_unique($fontMatches[1]));
+                  if (!str_starts_with($bytes, "%PDF-") || strlen($bytes) < 10000 || $document->getDomPDF()->getCanvas()->get_page_count() !== 1 || str_contains($bytes, "/JavaScript") || !str_contains($bytes, "/FontFile2") || !str_contains(implode(" ", $fonts), "DejaVuSans")) { throw new RuntimeException("PDF content/font reception failed"); }
+                  $installed = json_decode(file_get_contents("vendor/composer/installed.json"), true, 512, JSON_THROW_ON_ERROR);
+                  if (($installed["dev"] ?? null) !== false || is_dir("vendor/pestphp") || is_dir("vendor/phpunit")) { throw new RuntimeException("Development dependencies in production image"); }
+                  file_put_contents("/tmp/pdf-simple.pdf", $bytes);
+                  echo json_encode(["imageId"=>getenv("EPR_IMAGE_ID"),"sourceSha"=>getenv("EPR_SOURCE_SHA"),"nativeExit"=>0,"php"=>PHP_VERSION,"uid"=>posix_geteuid(),"environment"=>$app->environment(),"bytes"=>strlen($bytes),"sha256"=>hash("sha256",$bytes),"pages"=>$document->getDomPDF()->getCanvas()->get_page_count(),"fontNames"=>$fonts,"embeddedTrueType"=>true,"scriptsDisabled"=>true,"productionDependenciesOnly"=>true], JSON_PRETTY_PRINT|JSON_THROW_ON_ERROR)."\n";
+                  PHPPDF
+                  "${image_compose[@]}" exec -T php cat /tmp/pdf-simple.pdf > "$RUNNER_TEMP/image-proof/pdf-simple.pdf"
+                  python3 - <<'PYPDF'
+                  import hashlib, json, os
+                  from pathlib import Path
+                  root = Path(os.environ['RUNNER_TEMP']) / 'image-proof'
+                  proof = json.loads((root / 'pdf-native.json').read_text())
+                  assert proof['imageId'] == os.environ['QUALIFIED_IMAGE_ID'] and proof['sourceSha'] == os.environ['EXPECTED_SOURCE']
+                  assert proof['nativeExit'] == 0 and proof['productionDependenciesOnly'] and proof['embeddedTrueType'] and proof['scriptsDisabled'] and proof['pages'] == 1
+                  assert len((root / 'pdf-simple.pdf').read_bytes()) == proof['bytes']
+                  assert hashlib.sha256((root / 'pdf-simple.pdf').read_bytes()).hexdigest() == proof['sha256']
+                  PYPDF
+                  "${image_compose[@]}" exec -T image-reverb php -r '
+                  require "vendor/autoload.php";
+                  $app = require "bootstrap/app.php";
+                  $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+                  $key = config("reverb.apps.apps.0.key");
+                  $reverb = $app->make(Laravel\Reverb\Contracts\ApplicationProvider::class)->findByKey($key);
+                  echo json_encode(["appUrl" => config("app.url"), "allowedOrigins" => $reverb->allowedOrigins(),
+                    "publicKey" => $reverb->key(), "activityTimeout" => $reverb->activityTimeout(),
+                    "cache" => config("cache.default"), "scaling" => config("reverb.servers.reverb.scaling.enabled")], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n";
+                  ' > "$RUNNER_TEMP/image-proof/reverb-config.json"
+                  export QUALIFIED_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$EPR_IMAGE")
+                  (
+                    set +e
+                    python3 - <<'PYREVERB' > "$RUNNER_TEMP/image-proof/reverb-protocol.jsonl" 2> "$RUNNER_TEMP/image-proof/reverb-protocol.stderr"
+                  import base64, hashlib, json, os, socket, struct, time
+                  from pathlib import Path
+                  from urllib.parse import urlsplit
+                  root = Path(os.environ['RUNNER_TEMP'])
+                  config = json.loads((root / 'image-proof' / 'reverb-config.json').read_text())
+                  origin = config['appUrl']
+                  assert origin == 'http://image.invalid:8183'
+                  assert config['allowedOrigins'] == [urlsplit(origin).hostname]
+                  assert config['cache'] == 'file' and config['scaling'] is False
+
+                  def record(**values):
+                      print(json.dumps({'imageId': os.environ['QUALIFIED_IMAGE_ID'], **values}), flush=True)
+
+                  def connect(origin):
+                      connection = socket.create_connection(('127.0.0.1', 8193), timeout=10)
+                      stream = connection.makefile('rb')
+                      key = base64.b64encode(os.urandom(16)).decode()
+                      path = '/app/' + config['publicKey'] + '?protocol=7&client=qualification&version=1'
+                      headers = f'GET {path} HTTP/1.1\r\nHost: image.invalid:8193\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nOrigin: {origin}\r\n\r\n'
+                      connection.sendall(headers.encode())
+                      response = stream.readline(4096)
+                      assert b' 101 ' in response
+                      received, size = {}, len(response)
+                      while True:
+                          line = stream.readline(4096)
+                          size += len(line)
+                          assert line and size < 16384
+                          if line == b'\r\n': break
+                          name, value = line.decode().split(':', 1)
+                          received[name.lower()] = value.strip()
+                      expected = base64.b64encode(hashlib.sha1((key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
+                      assert received['sec-websocket-accept'] == expected
+                      return connection, stream
+
+                  def frame(stream):
+                      head = stream.read(2)
+                      if not head: return 8, b''
+                      assert len(head) == 2 and head[0] & 128 and not head[1] & 128
+                      opcode, length = head[0] & 15, head[1] & 127
+                      if length == 126: length = struct.unpack('!H', stream.read(2))[0]
+                      if length == 127: length = struct.unpack('!Q', stream.read(8))[0]
+                      assert length <= 16384
+                      payload = stream.read(length)
+                      assert len(payload) == length
+                      return opcode, payload
+
+                  accepted, accepted_stream = connect(origin)
+                  try:
+                      opcode, payload = frame(accepted_stream)
+                      event = json.loads(payload)
+                      data = json.loads(event['data'])
+                      assert opcode == 1 and event['event'] == 'pusher:connection_established'
+                      assert isinstance(data['socket_id'], str) and data['socket_id']
+                      assert data['activity_timeout'] == config['activityTimeout']
+                      record(origin=origin, event=event['event'], socketId=data['socket_id'], activityTimeout=data['activity_timeout'])
+                      foreign_origin = 'http://foreign.invalid:8183'
+                      foreign, foreign_stream = connect(foreign_origin)
+                      try:
+                          opcode, payload = frame(foreign_stream)
+                          event = json.loads(payload)
+                          data = json.loads(event['data'])
+                          assert opcode == 1 and event['event'] == 'pusher:error' and data['code'] == 4009
+                          record(origin=foreign_origin, event=event['event'], code=data['code'], connectionEstablished=False)
+                      finally:
+                          foreign_stream.close()
+                          foreign.close()
+                      (root / 'reverb-ready').touch()
+                      accepted.settimeout(240)
+                      opcode, payload = frame(accepted_stream)
+                      assert opcode == 8, 'Accepted connection did not close at service stop'
+                      record(origin=origin, acceptedConnectionClosed=True)
+                      (root / 'reverb-closed').touch()
+                  finally:
+                      accepted_stream.close()
+                      accepted.close()
+                  PYREVERB
+                    native=$?
+                    printf '%s\n' "$native" > "$RUNNER_TEMP/reverb-native"
+                    exit "$native"
+                  ) > /dev/null 2>&1 < /dev/null &
+                  for attempt in {1..100}; do
+                    if test -f "$RUNNER_TEMP/reverb-ready"; then break; fi
+                    if test -f "$RUNNER_TEMP/reverb-native"; then cat "$RUNNER_TEMP/image-proof/reverb-protocol.stderr"; exit 1; fi
+                    sleep 0.1
+                  done
+                  test -f "$RUNNER_TEMP/reverb-ready"
+                  "${image_compose[@]}" ps --format json > "$RUNNER_TEMP/image-proof/services.json"
+                  touch .epr-local/image-checked
+
+            - name: Archiver le contenu exact et mesurer son poids
+              id: archive
+              run: |
+                  docker image save "$EPR_IMAGE" | gzip -1 > "$RUNNER_TEMP/image.tar.gz"
+                  sha256sum "$RUNNER_TEMP/image.tar.gz" | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/image-proof/archive.sha256"
+                  stat -c %s "$RUNNER_TEMP/image.tar.gz" > "$RUNNER_TEMP/image-proof/archive-bytes.txt"
+
+            - name: Arrêter réellement chaque rôle image
+              id: image_stop
+              if: ${{ always() && steps.image_check.outcome != 'skipped' }}
+              timeout-minutes: 5
+              run: |
+                  test -f .epr-local/image.env
+                  project="epr-test-c-$EPR_RUN"
+                  docker compose --env-file .epr-local/image.env -p "$project" -f compose.image-check.yaml stop -t 90
+                  for service in web php image-horizon image-reverb image-scheduler; do
+                    id=$(docker ps -aq --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=$service")
+                    test -n "$id"
+                    test "$(docker inspect --format '{{.State.Running}} {{.State.ExitCode}} {{.State.OOMKilled}}' "$id")" = 'false 0 false'
+                    docker inspect --format '{{.Name}} {{.Config.StopSignal}} {{.State.StartedAt}} {{.State.FinishedAt}} {{.State.ExitCode}}' "$id" >> "$RUNNER_TEMP/image-proof/stops.txt"
+                  done
+                  for attempt in {1..100}; do
+                    if test -f "$RUNNER_TEMP/reverb-native"; then break; fi
+                    sleep 0.1
+                  done
+                  test "$(cat "$RUNNER_TEMP/reverb-native")" = 0
+                  test -f "$RUNNER_TEMP/reverb-closed"
+                  docker compose --env-file .epr-local/image.env -p "$project" -f compose.image-check.yaml logs --no-color image-reverb > "$RUNNER_TEMP/image-proof/reverb-stop.log"
+                  grep -q 'Gracefully terminating connections' "$RUNNER_TEMP/image-proof/reverb-stop.log"
+                  touch .epr-local/image-stopped
+
+            - name: Vérifier la capacité avant upload de l'archive
+              id: capacity
+              if: ${{ inputs.store_archive && steps.archive.outcome == 'success' && steps.image_stop.outcome == 'success' }}
+              env:
+                  VERIFIED_HEADROOM: ${{ vars.EPR_ACTIONS_STORAGE_HEADROOM_BYTES }}
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  # C records account-wide free headroom only after receiving its billing evidence.
+                  [[ "$VERIFIED_HEADROOM" =~ ^[0-9]+$ ]]
+                  test "$VERIFIED_HEADROOM" -le 524288000
+                  gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired == false) | .size_in_bytes] | add // 0' > "$RUNNER_TEMP/active-artifacts-bytes.txt"
+                  current=$(awk '{total += $1} END {print total+0}' "$RUNNER_TEMP/active-artifacts-bytes.txt")
+                  archive=$(cat "$RUNNER_TEMP/image-proof/archive-bytes.txt")
+                  # Reserve 10 MiB for proofs/upload overhead; no deletion or paid overage.
+                  test "$((archive + current + 10485760))" -le "$VERIFIED_HEADROOM"
+                  printf 'archive=%s\nactiveRepositoryArtifacts=%s\nverifiedAccountBudget=%s\n' "$archive" "$current" "$VERIFIED_HEADROOM" > "$RUNNER_TEMP/image-proof/capacity.txt"
+
+            - name: Conserver l'archive pour transfert sans reconstruction
+              id: image_upload
+              if: ${{ inputs.store_archive && steps.capacity.outcome == 'success' }}
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+              with:
+                  name: production-image-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ runner.temp }}/image.tar.gz
+                  compression-level: 0
+                  retention-days: 7
+                  if-no-files-found: error
+
+            - name: Arrêter les processus de cette réception
+              id: stop
+              if: ${{ always() && steps.bootstrap.outcome != 'skipped' }}
+              timeout-minutes: 5
+              run: |
+                  test -f .env
+                  test -x vendor/bin/sail
+                  SAIL_SKIP_CHECKS=1 ./vendor/bin/sail stop -t 90
+                  project="epr-test-c-$EPR_RUN"
+                  test -z "$(docker ps -q --filter "label=com.docker.compose.project=$project")"
+                  touch .epr-local/stopped
+
+            - name: Rapprocher les résultats natifs et leur exécution
+              id: receipt
+              if: ${{ always() && steps.checkout.outcome == 'success' }}
+              env:
+                  IMAGES_RESULT: ${{ steps.images.outcome }}
+                  BOOTSTRAP_RESULT: ${{ steps.bootstrap.outcome }}
+                  START_RESULT: ${{ steps.start.outcome }}
+                  CHECK_RESULT: ${{ steps.check.outcome }}
+                  TESTS_RESULT: ${{ steps.tests.outcome }}
+                  STOP_RESULT: ${{ steps.stop.outcome }}
+                  IMAGE_RESULT: ${{ steps.image.outcome }}
+                  SCAN_RESULT: ${{ steps.scan.outcome }}
+                  MEDIA_TESTS_RESULT: ${{ steps.media_tests.outcome }}
+                  IMAGE_CHECK_RESULT: ${{ steps.image_check.outcome }}
+                  ARCHIVE_RESULT: ${{ steps.archive.outcome }}
+                  IMAGE_STOP_RESULT: ${{ steps.image_stop.outcome }}
+                  CAPACITY_RESULT: ${{ steps.capacity.outcome }}
+                  IMAGE_UPLOAD_RESULT: ${{ steps.image_upload.outcome }}
+                  STORE_ARCHIVE: ${{ inputs.store_archive }}
+              run: |
+                  export EPR_IMAGE_PROOF=/image-proof
+                  export RECEIPT_SHA="$(git rev-parse HEAD)"
+                  export RECEIPT_ROOT="$(printf '%s' "$PWD" | sha256sum | cut -d ' ' -f 1)"
+                  export RECEIPT_UNCHANGED=false
+                  if git diff --quiet HEAD && test -z "$(git ls-files --others --exclude-standard)"; then export RECEIPT_UNCHANGED=true; fi
+                  # A preparation that cannot provide its runtime cannot validate the base.
+                  test -x vendor/bin/sail
+                  runtime=$(sed -n 's/^EPR_RUNTIME_IMAGE="\(.*\)"$/\1/p' .env)
+                  export RECEIPT_RUNTIME="$(docker image inspect --format '{{.Id}}' "$runtime")"
+                  export RECEIPT_SOURCE="$(docker image inspect --format '{{ index .Config.Labels "org.epr.runtime-source" }}' "$runtime")"
+                  SAIL_SKIP_CHECKS=1 ./vendor/bin/sail --profile tools run --rm --no-deps -T --user "$(id -u):$(id -g)" --entrypoint php --volume "$RUNNER_TEMP/image-proof:/image-proof:ro" \
+                    -e EPR_IMAGE_PROOF -e RECEIPT_SHA -e RECEIPT_ROOT -e RECEIPT_UNCHANGED -e RECEIPT_RUNTIME -e RECEIPT_SOURCE \
+                    -e EXPECTED_SOURCE -e IMAGE_RESULT -e SCAN_RESULT -e MEDIA_TESTS_RESULT -e IMAGE_CHECK_RESULT -e ARCHIVE_RESULT -e IMAGE_STOP_RESULT -e CAPACITY_RESULT -e IMAGE_UPLOAD_RESULT -e STORE_ARCHIVE \
+                    -e GITHUB_REPOSITORY -e GITHUB_WORKFLOW_REF -e GITHUB_WORKFLOW_SHA -e GITHUB_SHA -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e EPR_RUN \
+                    -e IMAGES_RESULT -e BOOTSTRAP_RESULT -e START_RESULT -e CHECK_RESULT -e TESTS_RESULT -e STOP_RESULT laravel.test <<'PHP'
+                  <?php
+                  $expected = ['composer', 'platform', 'pint', 'phpstan', 'contracts', 'types', 'lint', 'format', 'build', 'composer-audit', 'npm-audit'];
+                  $checks = [];
+                  foreach (is_file('.epr-local/checks.tsv') ? file('.epr-local/checks.tsv', FILE_IGNORE_NEW_LINES) : [] as $line) {
+                      $row = explode("\t", $line);
+                      if (count($row) !== 2 || !ctype_digit($row[1])) { throw new RuntimeException('Invalid native result'); }
+                      $checks[] = ['control' => $row[0], 'nativeExit' => (int) $row[1], 'result' => $row[1] === '0' ? 'passed' : 'failed'];
+                  }
+                  $prepared = is_file('.epr-local/runtime') ? parse_ini_file('.epr-local/runtime') : [];
+                  $stages = [];
+                  foreach (['IMAGES', 'BOOTSTRAP', 'START', 'CHECK', 'TESTS', 'IMAGE', 'SCAN', 'MEDIA_TESTS', 'IMAGE_CHECK', 'ARCHIVE', 'IMAGE_STOP', 'STOP'] as $name) { $stages[$name] = getenv($name.'_RESULT'); }
+                  if (getenv('STORE_ARCHIVE') === 'true') { foreach (['CAPACITY', 'IMAGE_UPLOAD'] as $name) { $stages[$name] = getenv($name.'_RESULT'); } }
+                  $mediaPath = getenv('EPR_IMAGE_PROOF').'/media-tests.json';
+                  $pdfPath = getenv('EPR_IMAGE_PROOF').'/pdf-native.json';
+                  $imagePath = getenv('EPR_IMAGE_PROOF').'/image-inspect.json';
+                  $media = is_file($mediaPath) ? json_decode(file_get_contents($mediaPath), true, 512, JSON_THROW_ON_ERROR) : [];
+                  $pdf = is_file($pdfPath) ? json_decode(file_get_contents($pdfPath), true, 512, JSON_THROW_ON_ERROR) : [];
+                  $image = is_file($imagePath) ? json_decode(file_get_contents($imagePath), true, 512, JSON_THROW_ON_ERROR)[0] : [];
+                  $imageId = $image['Id'] ?? null;
+                  $mediaValid = is_string($imageId) && ($media['imageId'] ?? null) === $imageId && ($pdf['imageId'] ?? null) === $imageId
+                      && ($media['sourceSha'] ?? null) === getenv('EXPECTED_SOURCE') && ($pdf['sourceSha'] ?? null) === getenv('EXPECTED_SOURCE')
+                      && ($media['nativeExit'] ?? null) === 0 && ($pdf['nativeExit'] ?? null) === 0
+                      && ($media['files'] ?? null) === ['tests/Feature/Foundation/ImageEngineTest.php', 'tests/Feature/Foundation/PdfEngineTest.php']
+                      && ($pdf['productionDependenciesOnly'] ?? false) && ($pdf['embeddedTrueType'] ?? false) && ($pdf['scriptsDisabled'] ?? false);
+                  $valid = getenv('RECEIPT_SHA') === getenv('EXPECTED_SOURCE') && getenv('RECEIPT_UNCHANGED') === 'true'
+                      && count(array_filter($stages, fn ($result) => $result !== 'success')) === 0
+                      && ($prepared['root'] ?? null) === getenv('RECEIPT_ROOT')
+                      && ($prepared['project'] ?? null) === 'epr-test-c-'.getenv('EPR_RUN')
+                      && ($prepared['image'] ?? null) === getenv('RECEIPT_RUNTIME')
+                      && ($prepared['source'] ?? null) === getenv('RECEIPT_SOURCE')
+                      && is_file('.epr-local/image-checked') && is_file('.epr-local/image-stopped') && is_file('.epr-local/stopped')
+                      && $mediaValid
+                      && array_column($checks, 'control') === $expected
+                      && count(array_filter($checks, fn ($row) => $row['nativeExit'] !== 0)) === 0;
+                  $receipt = ['repository' => getenv('GITHUB_REPOSITORY'), 'workflowRef' => getenv('GITHUB_WORKFLOW_REF'),
+                      'workflowSha' => getenv('GITHUB_WORKFLOW_SHA'), 'sha' => getenv('RECEIPT_SHA'), 'expectedSha' => getenv('EXPECTED_SOURCE'),
+                      'run' => getenv('GITHUB_RUN_ID'), 'attempt' => getenv('GITHUB_RUN_ATTEMPT'), 'profile' => 'local',
+                      'project' => $prepared['project'] ?? null, 'stages' => $stages, 'required' => $expected, 'checks' => $checks,
+                      'validated' => $valid, 'imageId' => $imageId, 'mediaValidated' => $mediaValid, 'runtimeId' => getenv('RECEIPT_RUNTIME'), 'runtimeSource' => getenv('RECEIPT_SOURCE'),
+                      'locks' => array_combine(['composer.lock', 'package-lock.json'], array_map('hash_file', ['sha256', 'sha256'], ['composer.lock', 'package-lock.json']))];
+                  file_put_contents('.epr-local/base-receipt.json', json_encode($receipt, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n");
+                  file_put_contents('.epr-local/receipt-output', 'validated='.($valid ? 'true' : 'false')."\nsha=".$receipt['sha']."\nrun=".$receipt['run']."\nattempt=".$receipt['attempt']."\n");
+                  PHP
+                  cp .epr-local/base-receipt.json "$RUNNER_TEMP/base-receipt.json"
+                  cat .epr-local/receipt-output >> "$GITHUB_OUTPUT"
+                  printf '```json\n' >> "$GITHUB_STEP_SUMMARY"
+                  cat .epr-local/base-receipt.json >> "$GITHUB_STEP_SUMMARY"
+                  printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Conserver le reçu sans configuration ni secrets
+              if: ${{ always() && steps.receipt.outcome == 'success' }}
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+              with:
+                  name: base-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ runner.temp }}/base-receipt.json
+                  if-no-files-found: error
+                  retention-days: 14
+
+            - name: Conserver les pièces d'image sans secrets
+              if: ${{ always() && steps.image.outcome == 'success' }}
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+              with:
+                  name: image-proof-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ runner.temp }}/image-proof/
+                  retention-days: 90
+                  if-no-files-found: error

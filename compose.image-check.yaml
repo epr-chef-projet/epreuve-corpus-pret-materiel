@@ -1,0 +1,136 @@
+# Qualification only: same owned test project/network as the prepared Sail backend.
+# Supply a private --env-file; never use this profile with C or D resources.
+x-process: &process
+    image: '${EPR_IMAGE:?Select the exact qualified image}'
+    user: '10001:10001'
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    tmpfs:
+        - /tmp:uid=10001,gid=10001,mode=0700
+        - /var/www/html/bootstrap/cache:uid=10001,gid=10001,mode=0700
+        - /var/www/html/storage:uid=10001,gid=10001,mode=0700
+    networks: [sail]
+    stop_grace_period: 90s
+
+x-application: &application
+    APP_ENV: production
+    APP_DEBUG: 'false'
+    APP_KEY: '${IMAGE_APP_KEY:?Private test key required}'
+    APP_NAME: 'Prêt de matériel'
+    APP_URL: '${IMAGE_APP_URL:?Public test origin required}'
+    EPR_INSTANCE: '${IMAGE_INSTANCE:?Owned test identity required}'
+    LOG_CHANNEL: stderr
+    LOG_LEVEL: info
+    DB_CONNECTION: pgsql
+    DB_HOST: pgsql
+    DB_PORT: 5432
+    DB_DATABASE: laravel
+    DB_USERNAME: epr_app
+    DB_PASSWORD: '${IMAGE_DB_PASSWORD:?Application SQL credential required}'
+    DB_SEARCH_PATH: epr
+    REDIS_HOST: redis
+    REDIS_PREFIX: '${IMAGE_INSTANCE}_image_database_'
+    CACHE_STORE: redis
+    CACHE_PREFIX: '${IMAGE_INSTANCE}_image_cache_'
+    QUEUE_CONNECTION: redis
+
+services:
+    web:
+        <<: *process
+        command: [web]
+        stop_signal: SIGQUIT
+        environment:
+            EPR_PUBLIC_HTTP_PORT: '${IMAGE_HTTP_PORT}'
+        # No application, SQL, Redis or Reverb secret is passed to nginx.
+        ports: ['127.0.0.1:${IMAGE_HTTP_PORT:?Owned HTTP port required}:8080']
+        depends_on:
+            php: { condition: service_healthy }
+        healthcheck:
+            test:
+                [
+                    CMD,
+                    curl,
+                    --fail,
+                    --silent,
+                    --output,
+                    /dev/null,
+                    'http://127.0.0.1:8080/up',
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 18
+    php:
+        <<: *process
+        command: [php]
+        stop_signal: SIGQUIT
+        environment:
+            <<: *application
+            SESSION_DRIVER: redis
+            SESSION_CONNECTION: sessions
+            SESSION_COOKIE: '${IMAGE_INSTANCE}_image_session'
+            SESSION_SECURE_COOKIE: 'false'
+            MAIL_MAILER: smtp
+            MAIL_HOST: mailpit
+            MAIL_PORT: 1025
+            REVERB_APP_KEY: '${IMAGE_REVERB_KEY:?Public Reverb key required}'
+            REVERB_PUBLIC_HOST: '${IMAGE_PUBLIC_HOST:?Public Reverb host required}'
+            REVERB_PUBLIC_PORT: '${IMAGE_REVERB_PORT:?Owned Reverb port required}'
+            REVERB_PUBLIC_SCHEME: http
+        healthcheck:
+            test: [CMD, php, -r, 'exit(@fsockopen("127.0.0.1", 9000) ? 0 : 1);']
+            interval: 5s
+            timeout: 5s
+            retries: 18
+    image-horizon:
+        <<: *process
+        command: [horizon]
+        stop_signal: SIGTERM
+        environment: *application
+        healthcheck:
+            test: [CMD, php, artisan, 'horizon:status']
+            interval: 5s
+            timeout: 5s
+            retries: 18
+    image-reverb:
+        <<: *process
+        command: [reverb]
+        stop_signal: SIGTERM
+        environment:
+            APP_ENV: production
+            APP_DEBUG: 'false'
+            APP_URL: '${IMAGE_APP_URL:?Public test origin required}'
+            LOG_CHANNEL: stderr
+            CACHE_STORE: file
+            REVERB_APP_ID: '${IMAGE_INSTANCE}'
+            REVERB_APP_KEY: '${IMAGE_REVERB_KEY}'
+            REVERB_APP_SECRET: '${IMAGE_REVERB_SECRET:?Private Reverb secret required}'
+            REVERB_SCALING_ENABLED: 'false'
+        ports: ['127.0.0.1:${IMAGE_REVERB_PORT}:8080']
+        healthcheck:
+            test: [CMD, php, -r, 'exit(@fsockopen("127.0.0.1", 8080) ? 0 : 1);']
+            interval: 5s
+            timeout: 5s
+            retries: 18
+    image-scheduler:
+        <<: *process
+        command: [scheduler]
+        stop_signal: SIGTERM
+        # No scheduled application task is installed yet; extend with its owning lot.
+        environment:
+            APP_ENV: production
+            APP_DEBUG: 'false'
+            LOG_CHANNEL: stderr
+            CACHE_STORE: file
+        healthcheck:
+            test: [CMD, php, artisan, 'schedule:list', --no-interaction]
+            interval: 5s
+            timeout: 5s
+            retries: 18
+
+networks:
+    sail:
+        driver: bridge
+        labels:
+            org.epr.root: '${IMAGE_ROOT_FINGERPRINT:?Owned backend root required}'

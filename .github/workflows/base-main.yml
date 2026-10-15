@@ -1,0 +1,42 @@
+name: Base — révisions intégrées
+
+on:
+    push:
+        branches: [main, qualification/p-epr-c-07]
+
+permissions:
+    contents: read
+    actions: read
+
+concurrency:
+    group: base-main-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    validation:
+        uses: ./.github/workflows/base-common.yml
+        with:
+            store_archive: ${{ github.ref == 'refs/heads/main' }}
+
+    base-main:
+        name: base-main
+        needs: validation
+        if: ${{ always() }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 3
+        steps:
+            - name: Exiger les preuves de cette révision intégrée
+              env:
+                  RESULT: ${{ needs.validation.result }}
+                  VALIDATED: ${{ needs.validation.outputs.validated }}
+                  ACTUAL_SHA: ${{ needs.validation.outputs.sha }}
+                  ACTUAL_RUN: ${{ needs.validation.outputs.run }}
+                  ACTUAL_ATTEMPT: ${{ needs.validation.outputs.attempt }}
+                  JOB_STATUS: ${{ job.status }}
+              run: |
+                  test "$JOB_STATUS" = success
+                  test "$RESULT" = success
+                  test "$VALIDATED" = true
+                  test "$ACTUAL_SHA" = "$GITHUB_SHA"
+                  test "$ACTUAL_RUN" = "$GITHUB_RUN_ID"
+                  test "$ACTUAL_ATTEMPT" = "$GITHUB_RUN_ATTEMPT"

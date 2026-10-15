@@ -1,0 +1,41 @@
+# Third-party dependencies
+/vendor/
+/node_modules/
+
+# Generated build, runtime and test output
+/public/build/
+/public/browser-build/
+/public/fonts-manifest.browser.json
+/bootstrap/ssr/
+/bootstrap/cache/
+/storage/
+/coverage/
+/test-results/
+/playwright-report/
+
+# Generated Wayfinder code and dependency locks
+/resources/js/actions/
+/resources/js/routes/
+/resources/js/wayfinder/
+/composer.lock
+/package-lock.json
+
+# Rule sources maintained in their source corpus and generated agent adapters
+/.ai/rules/
+/.ai/guidelines/00-project-socle.md
+/.claude/rules/
+
+# Local editor files and temporary bootstrap sources
+/.idea/
+/.epr-starter-source/
+
+# Disposable local qualification output
+/.epr-local/
+/.vitest/
+
+
+
+# Generated contracts checked by concordance and strict type analysis.
+/tests/Frontend/generated/
+/resources/js/types/generated/
+project-management/local/**

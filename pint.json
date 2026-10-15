@@ -1,0 +1,4 @@
+{
+    "preset": "laravel",
+    "exclude": [".epr-local", "project-management/local"]
+}

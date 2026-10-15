@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Sail's supported Docker binary override, with clone-specific preconditions.
+source "$(dirname -- "${BASH_SOURCE[0]}")/environment.sh"
+check_configuration
+if [[ "${1:-}" == compose ]]; then
+    task_command=''
+    task_args=("$@")
+    for ((index=1; index<${#task_args[@]}; index++)); do
+        case "${task_args[index]}" in
+            -f|--file)
+                index=$((index+1))
+                case "${task_args[index]:-}" in
+                    compose.yaml) ;;
+                    compose.bootstrap.yaml) ;;
+                    .epr-local/compose.volumes.yaml) [[ -f .epr-local/compose.volumes.yaml ]] || fail 'Missing legacy volume overlay.';;
+                    *) fail 'Unexpected Compose file.';;
+                esac;;
+            -p|--project-name|--project-directory|--env-file|--context|--host)
+                fail 'Target overrides are not admitted by the shared Sail configuration.';;
+            --profile)
+                index=$((index+1)); [[ "${task_args[index]:-}" == tools ]] || fail 'Unknown Compose profile.';;
+            --*) fail 'Unexpected global Compose option.';;
+            *) task_command="${task_args[index]}"; break;;
+        esac
+    done
+    if [[ "$task_command" == down ]]; then
+        fail 'Container/volume removal requires a separate operation; use Sail stop.'
+    fi
+    if [[ "$task_command" =~ ^(up|start|restart|stop|build|pull|run)$ ]]; then
+        if [[ "$(readlink /proc/$$/fd/9 2>/dev/null || true)" != "$task_root/.epr-local/development.lock" ]]; then
+            exec 8>.epr-local/development.lock
+            flock -n 8 || fail 'Another operation owns this clone.' 5
+        fi
+    fi
+fi
+exec docker "$@"

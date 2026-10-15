@@ -1,0 +1,41 @@
+name: Base — propositions
+
+on:
+    pull_request:
+        branches: [main, qualification/p-epr-c-07]
+        types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+    contents: read
+    actions: read
+
+concurrency:
+    group: base-pr-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    validation:
+        uses: ./.github/workflows/base-common.yml
+
+    base-pr:
+        name: base-pr
+        needs: validation
+        if: ${{ always() }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 3
+        steps:
+            - name: Exiger les preuves de cette proposition
+              env:
+                  RESULT: ${{ needs.validation.result }}
+                  VALIDATED: ${{ needs.validation.outputs.validated }}
+                  ACTUAL_SHA: ${{ needs.validation.outputs.sha }}
+                  ACTUAL_RUN: ${{ needs.validation.outputs.run }}
+                  ACTUAL_ATTEMPT: ${{ needs.validation.outputs.attempt }}
+                  JOB_STATUS: ${{ job.status }}
+              run: |
+                  test "$JOB_STATUS" = success
+                  test "$RESULT" = success
+                  test "$VALIDATED" = true
+                  test "$ACTUAL_SHA" = "$GITHUB_SHA"
+                  test "$ACTUAL_RUN" = "$GITHUB_RUN_ID"
+                  test "$ACTUAL_ATTEMPT" = "$GITHUB_RUN_ATTEMPT"

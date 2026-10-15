@@ -1,0 +1,120 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "laravel/vue-starter-kit",
+    "type": "project",
+    "description": "The skeleton application for the Laravel framework.",
+    "keywords": [
+        "laravel",
+        "framework"
+    ],
+    "license": "MIT",
+    "require": {
+        "barryvdh/laravel-dompdf": "^3.1",
+        "ext-bcmath": "*",
+        "ext-exif": "*",
+        "ext-fileinfo": "*",
+        "ext-imagick": "*",
+        "ext-intl": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "ext-pcntl": "*",
+        "ext-pdo_pgsql": "*",
+        "ext-posix": "*",
+        "ext-redis": "*",
+        "ext-zip": "*",
+        "inertiajs/inertia-laravel": "^3.0",
+        "intervention/image": "^4",
+        "laravel/chisel": "^0.1.0",
+        "laravel/fortify": "^1.37.2",
+        "laravel/framework": "^13.17",
+        "laravel/horizon": "^5",
+        "laravel/reverb": "^1",
+        "laravel/tinker": "^3.0",
+        "laravel/wayfinder": "^0.1.14",
+        "php": "~8.5.0",
+        "spatie/laravel-data": "^4"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.24",
+        "larastan/larastan": "^3.9",
+        "laravel/boost": "^2",
+        "laravel/pail": "^1.2.5",
+        "laravel/pao": "^1.0.6",
+        "laravel/pint": "^1.27",
+        "laravel/sail": "^1.53",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.9.3",
+        "pestphp/pest": "^5",
+        "pestphp/pest-plugin-laravel": "^5",
+        "phpunit/phpunit": "^13",
+        "spatie/laravel-typescript-transformer": "^3"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "lint": [
+            "pint --parallel"
+        ],
+        "lint:check": [
+            "pint --parallel --test"
+        ],
+        "ci:check": [
+            "@composer validate --strict --no-check-publish",
+            "@composer check-platform-reqs",
+            "pint --test",
+            "phpstan analyse --no-progress",
+            "@composer contracts:generate -- --check",
+            "npm run check:types",
+            "npm run check:lint",
+            "npm run check:format",
+            "npm run build",
+            "@composer audit --locked --format=json",
+            "npm audit --json"
+        ],
+        "types:check": [
+            "phpstan analyse"
+        ],
+        "test": [
+            "@php artisan test --compact"
+        ],
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ],
+        "pre-package-uninstall": [
+            "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"
+        ],
+        "contracts:generate": "@php scripts/contracts.php",
+        "check:php": [
+            "pint --test",
+            "phpstan analyse --no-progress"
+        ],
+        "test:php": "@php artisan test --compact",
+        "test:contracts": "@php scripts/contracts-generate.php"
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

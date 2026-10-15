@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Initialize private clone settings only. Installation and lifecycle use Docker/Sail.
+source "$(dirname -- "${BASH_SOURCE[0]}")/environment.sh"
+umask 077
+instance='' run_name='' offset=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --instance) instance="${2:?Missing instance}"; shift 2;;
+        --run) run_name="${2:?Missing run}"; shift 2;;
+        --port-offset) offset="${2:?Missing port offset}"; shift 2;;
+        *) fail 'Usage: scripts/bootstrap --instance a|b|c [--run name] [--port-offset number]' 2;;
+    esac
+done
+[[ "$instance" =~ ^[abc]$ && "$offset" =~ ^[0-9]{1,4}$ ]] || fail 'Explicit instance and numeric port offset required.' 2
+[[ -z "$run_name" || "$run_name" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || fail 'Invalid isolated run.' 2
+[[ "$((10#$offset))" -le 1000 ]] || fail 'Port offset must not exceed 1000.' 2
+task_project="epr-$instance"
+[[ -z "$run_name" ]] || task_project="epr-test-$instance-$run_name"
+for selector in COMPOSE_FILE COMPOSE_PROJECT_NAME DOCKER_HOST DOCKER_CONTEXT SAIL_FILES APP_SERVICE APP_USER APP_ENV APP_CONFIG_CACHE DB_URL DB_HOST DB_DATABASE DB_USERNAME; do
+    [[ -z "${!selector:-}" ]] || fail "Inherited selector refused: $selector"
+done
+[[ "$(docker context show)" == default ]] || fail 'Unexpected Docker context.'
+[[ ! -L .env && ! -L .epr-local && ! -L .epr-local/development.lock && ! -e bootstrap/cache/config.php ]] || fail 'Inspect symlinked configuration or the Laravel cache.'
+mkdir -p .epr-local
+[[ "$(stat -c %u .epr-local)" == "$(id -u)" ]] || fail 'Foreign local state.'
+chmod 700 .epr-local
+exec 9>.epr-local/development.lock
+flock -n 9 || fail 'Another preparation owns this clone.' 5
+check_resources
+set_value() {
+    local setting="$1" content="$2"
+    [[ "$content" != *$'\n'* && "$content" != *'"'* && "$content" != *'$('* && "$content" != *$'\x60'* ]] || fail 'Unsupported configuration value.'
+    sed -i "/^$setting=/d" .env
+    printf '%s="%s"\n' "$setting" "$content" >> .env
+}
+random_secret() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
+existing_configuration=true
+if [[ ! -e .env ]]; then
+    existing_configuration=false
+    cp .env.example .env
+    chmod 600 .env
+    number=3
+    [[ "$instance" != a ]] || number=1
+    [[ "$instance" != b ]] || number=2
+    secret_directory="$(dirname -- "$task_root")/.secrets/$task_project"
+    [[ ! -e "$secret_directory" && ! -L "$(dirname -- "$secret_directory")" ]] || fail 'Existing or foreign secret directory; preserve it.'
+    [[ ! -e "$(dirname -- "$secret_directory")" || "$(stat -c %u "$(dirname -- "$secret_directory")")" == "$(id -u)" ]] || fail 'Foreign secret parent.'
+    mkdir -p -m 700 "$secret_directory"
+    chmod 700 "$(dirname -- "$secret_directory")"
+    for role in BOOTSTRAP APP MIGRATOR BACKUP; do
+        secret_file="$secret_directory/${role,,}.password"
+        printf '%s\n' "$(random_secret)" > "$secret_file"
+        chmod 444 "$secret_file"
+        set_value "POSTGRES_${role}_PASSWORD_FILE" "$secret_file"
+    done
+    set_value EPR_INSTANCE "$instance"
+    set_value COMPOSE_PROJECT_NAME "$task_project"
+    set_value EPR_ROOT_FINGERPRINT "$(fingerprint)"
+    set_value WWWUSER "$(id -u)"; set_value WWWGROUP "$(id -g)"
+    set_value APP_PORT "$((8080+number+10#$offset))"
+    set_value VITE_PORT "$((5170+number+10#$offset))"
+    set_value FORWARD_DB_PORT "$((54320+number+10#$offset))"
+    set_value FORWARD_MAILPIT_PORT "$((10250+number+10#$offset))"
+    set_value FORWARD_MAILPIT_DASHBOARD_PORT "$((8024+number+10#$offset))"
+    set_value REVERB_PUBLIC_PORT "$((8090+number+10#$offset))"
+    set_value APP_URL "http://$task_project.localhost:$(value APP_PORT)"
+    set_value DB_PASSWORD "$(head -c 64 "$(value POSTGRES_APP_PASSWORD_FILE)")"
+    set_value SESSION_COOKIE "${task_project//-/_}_session"
+    set_value REDIS_PREFIX "${task_project//-/_}_database_"
+    set_value REVERB_APP_ID "$task_project"
+    set_value REVERB_PUBLIC_HOST "$task_project.localhost"
+    set_value BROADCAST_CONNECTION reverb
+    set_value EPR_RUNTIME_IMAGE "$task_project-php85/app"
+fi
+[[ "$(value EPR_INSTANCE)" == "$instance" && "$(value COMPOSE_PROJECT_NAME)" == "$task_project" ]] || fail 'Existing clone identity differs; preserve it.'
+if [[ "$existing_configuration" == true ]]; then
+    check_configuration
+    printf '%s\n' 'Existing configuration, keys and secrets preserved. Follow the installation procedure if dependencies changed.'
+    exit 0
+fi
+if [[ -z "$(value APP_KEY)" ]]; then
+    set_value APP_KEY "base64:$(head -c 32 /dev/urandom | base64 -w 0)"
+fi
+for setting in REVERB_APP_KEY REVERB_APP_SECRET; do
+    if [[ -z "$(value "$setting")" ]]; then
+        set_value "$setting" "$(random_secret)"
+    fi
+done
+if [[ -z "$(value EPR_ROOT_FINGERPRINT)" ]]; then set_value EPR_ROOT_FINGERPRINT "$(fingerprint)"; fi
+if [[ -z "$(value EPR_RUNTIME_SOURCE)" ]]; then set_value EPR_RUNTIME_SOURCE "$(runtime_source)"; fi
+check_configuration
+printf '%s\n' 'Private configuration ready. Follow the installation procedure for Docker build, locked dependencies and migrations.'

@@ -1,0 +1,6 @@
+# Dependency preparation only: no public HTTP and no readiness claim.
+services:
+    laravel.test:
+        command: ['sleep', 'infinity']
+        ports: !reset []
+        healthcheck: !reset null

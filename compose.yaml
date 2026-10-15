@@ -1,0 +1,269 @@
+services:
+    laravel.test:
+        init: true
+        build:
+            context: './docker/8.5'
+            dockerfile: Dockerfile
+            args:
+                WWWGROUP: '${WWWGROUP}'
+            labels:
+                org.epr.runtime-source: '${EPR_RUNTIME_SOURCE:-unprepared}'
+        image: '${EPR_RUNTIME_IMAGE:-${COMPOSE_PROJECT_NAME}-php85/app}'
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+        ports:
+            - '127.0.0.1:${APP_PORT:-80}:80'
+        environment:
+            WWWUSER: '${WWWUSER}'
+            LARAVEL_SAIL: 1
+            XDEBUG_MODE: '${SAIL_XDEBUG_MODE:-off}'
+            XDEBUG_CONFIG: '${SAIL_XDEBUG_CONFIG:-client_host=host.docker.internal}'
+            IGNITION_LOCAL_SITES_PATH: '${PWD}'
+            MAGICK_CONFIGURE_PATH: '/var/www/html/docker/imagick'
+            MAGICK_MEMORY_LIMIT: 128MiB
+            MAGICK_MAP_LIMIT: 128MiB
+            MAGICK_DISK_LIMIT: 256MiB
+            MAGICK_THREAD_LIMIT: '1'
+            BOOST_RULES_ENABLED: 'false'
+            COMPOSER_HOME: '/tmp/epr-composer'
+            NPM_CONFIG_CACHE: '/tmp/epr-npm'
+        volumes:
+            - '.:/var/www/html'
+        networks:
+            - sail
+        depends_on:
+            pgsql: { condition: service_healthy }
+            redis: { condition: service_healthy }
+            mailpit: { condition: service_started }
+        healthcheck:
+            test:
+                [
+                    'CMD-SHELL',
+                    'php scripts/epr-probe.php && curl --fail --silent --output /dev/null http://127.0.0.1/login',
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 18
+        stop_grace_period: 90s
+    vite:
+        image: '${EPR_RUNTIME_IMAGE:-${COMPOSE_PROJECT_NAME}-php85/app}'
+        init: true
+        user: '${WWWUSER}:${WWWGROUP}'
+        entrypoint: ['/usr/bin/npm']
+        command: ['run', 'dev', '--', '--host', '0.0.0.0']
+        working_dir: /var/www/html
+        environment:
+            VITE_PORT: '${VITE_PORT}'
+        healthcheck:
+            test:
+                [
+                    'CMD',
+                    'node',
+                    '-e',
+                    'fetch("http://127.0.0.1:"+process.env.VITE_PORT+"/@vite/client").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))',
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 18
+        pre_stop:
+            - command:
+                  [
+                      'node',
+                      '-e',
+                      'const f=require("node:fs"); if(f.existsSync("public/hot") && f.lstatSync("public/hot").isFile()) f.unlinkSync("public/hot")',
+                  ]
+        stop_grace_period: 90s
+        ports:
+            - '127.0.0.1:${VITE_PORT:-5173}:${VITE_PORT:-5173}'
+        volumes:
+            - '.:/var/www/html'
+        networks: [sail]
+    horizon:
+        image: '${EPR_RUNTIME_IMAGE:-${COMPOSE_PROJECT_NAME}-php85/app}'
+        init: true
+        restart: unless-stopped
+        user: '${WWWUSER}:${WWWGROUP}'
+        entrypoint: ['/usr/bin/php']
+        command: ['artisan', 'horizon']
+        working_dir: /var/www/html
+        environment:
+            MAGICK_CONFIGURE_PATH: '/var/www/html/docker/imagick'
+            MAGICK_MEMORY_LIMIT: 128MiB
+            MAGICK_MAP_LIMIT: 128MiB
+            MAGICK_DISK_LIMIT: 256MiB
+            MAGICK_THREAD_LIMIT: '1'
+            BOOST_RULES_ENABLED: 'false'
+        volumes:
+            - '.:/var/www/html'
+        networks: [sail]
+        depends_on:
+            pgsql: { condition: service_healthy }
+            redis: { condition: service_healthy }
+        healthcheck:
+            test: ['CMD', 'php', 'artisan', 'horizon:status']
+            interval: 5s
+            timeout: 5s
+            retries: 18
+        stop_grace_period: 90s
+    reverb:
+        image: '${EPR_RUNTIME_IMAGE:-${COMPOSE_PROJECT_NAME}-php85/app}'
+        init: true
+        restart: unless-stopped
+        user: '${WWWUSER}:${WWWGROUP}'
+        entrypoint: ['/usr/bin/php']
+        command: ['artisan', 'reverb:start', '--host=0.0.0.0', '--port=8080']
+        working_dir: /var/www/html
+        environment:
+            BOOST_RULES_ENABLED: 'false'
+        ports:
+            - '127.0.0.1:${REVERB_PUBLIC_PORT:-8093}:8080'
+        volumes:
+            - '.:/var/www/html'
+        networks: [sail]
+        depends_on:
+            redis: { condition: service_healthy }
+        healthcheck:
+            test:
+                [
+                    'CMD',
+                    'php',
+                    '-r',
+                    'exit(@fsockopen("127.0.0.1", 8080) ? 0 : 1);',
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 18
+        stop_grace_period: 90s
+    scheduler:
+        image: '${EPR_RUNTIME_IMAGE:-${COMPOSE_PROJECT_NAME}-php85/app}'
+        init: true
+        restart: unless-stopped
+        user: '${WWWUSER}:${WWWGROUP}'
+        entrypoint: ['/usr/bin/php']
+        command: ['artisan', 'schedule:work']
+        working_dir: /var/www/html
+        environment:
+            BOOST_RULES_ENABLED: 'false'
+            MAGICK_CONFIGURE_PATH: '/var/www/html/docker/imagick'
+            MAGICK_MEMORY_LIMIT: 128MiB
+            MAGICK_MAP_LIMIT: 128MiB
+            MAGICK_DISK_LIMIT: 256MiB
+            MAGICK_THREAD_LIMIT: '1'
+        volumes:
+            - '.:/var/www/html'
+        networks: [sail]
+        depends_on:
+            pgsql: { condition: service_healthy }
+            redis: { condition: service_healthy }
+        healthcheck:
+            test: ['CMD-SHELL', 'kill -0 1']
+            interval: 5s
+            timeout: 5s
+            retries: 3
+        stop_grace_period: 90s
+    migrator:
+        profiles: ['tools']
+        image: '${EPR_RUNTIME_IMAGE:-${COMPOSE_PROJECT_NAME}-php85/app}'
+        user: '${WWWUSER}:${WWWGROUP}'
+        working_dir: /var/www/html
+        entrypoint: ['/usr/bin/php', 'artisan']
+        command: ['migrate:status', '--no-interaction']
+        env_file: .env
+        environment:
+            DB_USERNAME: epr_migrator
+            DB_PASSWORD_FILE: /run/secrets/postgres_migrator_password
+            DB_URL: ''
+            APP_ENV: local
+            APP_CONFIG_CACHE: /tmp/epr-migration-config.php
+            XDG_CONFIG_HOME: /tmp
+        volumes:
+            - '.:/var/www/html'
+        secrets: [postgres_migrator_password]
+        networks: [sail]
+    pgsql:
+        image: 'postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873'
+        ports:
+            - '127.0.0.1:${FORWARD_DB_PORT:-5432}:5432'
+        environment:
+            POSTGRES_DB: '${DB_DATABASE}'
+            POSTGRES_USER: '${POSTGRES_BOOTSTRAP_USERNAME:?Missing POSTGRES_BOOTSTRAP_USERNAME in .env}'
+            POSTGRES_PASSWORD_FILE: '/run/secrets/postgres_bootstrap_password'
+        volumes:
+            - 'sail-pgsql:/var/lib/postgresql'
+            - './docker/pgsql/create-testing-database.sql:/docker-entrypoint-initdb.d/10-create-testing-database.sql:ro'
+            - type: bind
+              source: ./docker/pgsql/20-bootstrap.sh
+              target: /docker-entrypoint-initdb.d/20-bootstrap.sh
+              read_only: true
+              bind:
+                  create_host_path: false
+            - type: bind
+              source: ./docker/pgsql/bootstrap
+              target: /opt/epr-postgres-bootstrap
+              read_only: true
+              bind:
+                  create_host_path: false
+        secrets:
+            - postgres_bootstrap_password
+            - postgres_migrator_password
+            - postgres_app_password
+            - postgres_backup_password
+        networks:
+            - sail
+        healthcheck:
+            test:
+                - CMD
+                - pg_isready
+                - '-h'
+                - '127.0.0.1'
+                - '-q'
+                - '-d'
+                - '${DB_DATABASE}'
+                - '-U'
+                - '${POSTGRES_BOOTSTRAP_USERNAME}'
+            retries: 3
+            timeout: 5s
+    redis:
+        image: 'redis:8.2-alpine@sha256:b51665e66f00759be7c3152ad5ac3c66fb2f619c13ef62dea7cc1f9914524635'
+        volumes:
+            - 'sail-redis:/data'
+        networks:
+            - sail
+        healthcheck:
+            test:
+                - CMD
+                - redis-cli
+                - ping
+            retries: 3
+            timeout: 5s
+    mailpit:
+        image: 'axllent/mailpit@sha256:c076638db1e15662150be4fb62b8a6e96ef6ba5bde90c838a0239225854830f7'
+        ports:
+            - '127.0.0.1:${FORWARD_MAILPIT_PORT:-1025}:1025'
+            - '127.0.0.1:${FORWARD_MAILPIT_DASHBOARD_PORT:-8025}:8025'
+        networks:
+            - sail
+networks:
+    sail:
+        driver: bridge
+        labels:
+            org.epr.root: '${EPR_ROOT_FINGERPRINT:?Missing root identity}'
+volumes:
+    sail-pgsql:
+        driver: local
+        labels:
+            org.epr.root: '${EPR_ROOT_FINGERPRINT:?Missing root identity}'
+    sail-redis:
+        driver: local
+        labels:
+            org.epr.root: '${EPR_ROOT_FINGERPRINT:?Missing root identity}'
+
+secrets:
+    postgres_bootstrap_password:
+        file: '${POSTGRES_BOOTSTRAP_PASSWORD_FILE:?Missing POSTGRES_BOOTSTRAP_PASSWORD_FILE in .env}'
+    postgres_migrator_password:
+        file: '${POSTGRES_MIGRATOR_PASSWORD_FILE:?Missing POSTGRES_MIGRATOR_PASSWORD_FILE in .env}'
+    postgres_app_password:
+        file: '${POSTGRES_APP_PASSWORD_FILE:?Missing POSTGRES_APP_PASSWORD_FILE in .env}'
+    postgres_backup_password:
+        file: '${POSTGRES_BACKUP_PASSWORD_FILE:?Missing POSTGRES_BACKUP_PASSWORD_FILE in .env}'

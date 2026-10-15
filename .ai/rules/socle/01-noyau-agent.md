@@ -1,0 +1,61 @@
+# R01 — Noyau de travail des agents
+
+**Version 1.3 — suivi privé validé ; applicabilité à valider.** [Index des règles](../index.md#r01).
+
+Point d'entrée : [index des règles](../index.md). Portée : préparation, implémentation, correction, revue, modification documentaire, délégation et reprise. R01 possède la méthode de travail ; les règles de `socle/` et les compléments de `projet/` possèdent les techniques d'implémentation dans leur champ d'application.
+
+**Lecture des prescriptions.** Les identifiants `R01-001` à `R01-016` sont stables. **Obligation** : conformité requise, sauf dérogation recevable approuvée. **Revue** : examen et justification requis ; dépasser un seuil n'est pas automatiquement une faute. **Variante** : choix explicitement autorisé dans ses conditions. Sans mention différente, les prescriptions ci-dessous sont des obligations. Un contrôle absent ne rend pas une obligation facultative.
+
+## 1. Champ et statuts
+
+**R01-001 — Qualifier ce qui existe.** Distinguer fichier prévu, proposition, plan approuvé, brouillon rédigé, règle validée, instruction effectivement consultée et contrôle opérationnel. L'approbation du plan n'approuve pas automatiquement le contenu produit. Un fichier présent ou un test annoncé ne prouve ni son applicabilité ni son fonctionnement. Respecter les instructions de l'environnement ; les conventions du dépôt ne les remplacent pas.
+
+L'applicabilité est distincte de la validation : une procédure liée à un outil ou à une politique s'applique seulement lorsque ce choix est retenu dans les références du projet et concerne la tâche. Une branche inapplicable se laisse de côté ; ce n'est pas une dérogation. Cette sélection ne dispense pas des garanties communes pertinentes.
+
+**R01-002 — Traiter les références manquantes.** Vérifier dans l'index le statut des règles nécessaires. Une référence future n'est pas une règle applicable inventée. Rechercher un fichier annoncé mais introuvable ; signaler le manque s'il persiste. Une exigence essentielle encore indéfinie suspend les modifications dépendantes, sans empêcher la préparation documentaire ou les travaux indépendants déjà autorisés.
+
+## 2. Sources et autorité
+
+**R01-003 — Identifier la source propriétaire.** Utiliser les CDC et leurs décisions pour le comportement attendu et les solutions retenues ; retrouver le profil technique et les spécifications internes par l'index documentaire. Les règles validées de `socle/` possèdent les procédures et contraintes communes ; les compléments de `projet/` expliquent comment appliquer les choix documentés dans leur champ. Les versions, paramètres, commandes exactes et matrices concrètes restent dans leurs sources de conception ou configurations versionnées, sans liste concurrente de décisions dans les règles. Un exemple ou une branche technique n'adopte pas son outil. Examiner le statut de chaque décision : un CDC technique inachevé peut contenir des choix acquis. Code existant, laboratoire, exemples et documentation fournisseur renseignent sans autoriser une convention contraire au projet.
+
+**R01-004 — Résoudre les contradictions.** Identifier les passages contradictoires, leur statut et leur portée ; ne pas choisir la formulation qui facilite l'exécution. Une instruction explicite ultérieure de l'utilisateur peut modifier une décision du projet : la rattacher à sa source et la reporter dans le document propriétaire. Si l'intention reste ambiguë, demander l'arbitrage nécessaire avant les changements dépendants. Ne pas redemander une décision déjà reçue. Une proposition notée par un agent ne vaut jamais approbation.
+
+## 3. Consultation ciblée
+
+**R01-005 — Sélectionner avant de modifier.** Vérifier la racine et les instructions actives, puis consulter R01 et l'index. Retrouver les choix et leur statut dans le profil et les références du projet ; sélectionner ensuite règles communes, branches techniques et compléments existants selon le résultat demandé, les chemins concernés, les consommateurs et les risques : contrats, accès, données, concurrence, effets externes ou interface. Lire leur texte avant les modifications correspondantes ; compléter par une recherche ciblée si nécessaire. Une fiche d'index ne remplace pas la règle. Un complément annoncé mais non rédigé ne fournit aucune prescription supplémentaire ; appliquer R01-002 si une procédure essentielle manque.
+
+**R01-006 — Réviser la sélection.** Ajouter les règles pertinentes lorsqu'un nouvel impact apparaît, même sans nouveau fichier ; revoir aussi l'applicabilité après évolution du profil ou d'un choix technique. Les références croisées ne commandent pas une lecture récursive de tout le corpus. Un texte déjà disponible et inchangé n'exige pas une relecture cérémonielle ; après perte de contexte ou changement de référence, le consulter à nouveau. R02, R18, R20 et R21 sont des propriétaires complémentaires, à résoudre via l'index selon leur disponibilité et la tâche.
+
+## 4. Préparation et approbation
+
+**R01-007 — Faire approuver chaque intervention.** Avant toute modification du code, de la configuration ou des documents de référence, présenter un plan proportionné : résultat et critères de réussite, périmètre, dépendances/consommateurs, règles, impacts, vérifications et arbitrages nécessaires. Attendre une approbation explicite. L'exploration en lecture seule nécessaire au plan ne demande pas un « plan du plan ». Le suivi courant bénéficie de la liberté encadrée par R01-015.
+
+**R01-008 — Conserver la portée de l'accord.** Une approbation couvre une tâche cohérente, éventuellement plusieurs fichiers, et ses tests, corrections et ajustements nécessaires. Rattacher l'accord à une version identifiable du plan ; ne pas remplacer silencieusement le plan approuvé. Un accusé de réception ambigu ne suffit pas. Une extension de périmètre, une nouvelle décision importante ou une dérogation exige un complément approuvé avant les modifications dépendantes. Une reprise conserve l'accord si périmètre et hypothèses pertinentes restent valables. L'approbation ne change pas, à elle seule, le mode natif de l'outil.
+
+*Illustration — correction locale :* proposer un plan court pour corriger un libellé et vérifier les traductions/rendus concernés. Après accord, effectuer ces ajustements sans nouvelle permission par fichier ; ne pas ajouter une refonte de navigation.
+
+## 5. Exécution et collaboration
+
+**R01-009 — Maîtriser le changement.** Examiner l'état réel et les contributions présentes avant d'écrire. Préserver le travail d'autrui et modifier seulement ce qui est nécessaire au plan. Distinguer défaut préexistant, régression introduite et découverte adjacente. Un défaut existant ne justifie pas sa reproduction ; une découverte ne justifie pas une refonte tacite. Réévaluer le périmètre et traiter les risques dans le cadre de R01-008.
+
+**R01-010 — Déléguer explicitement.** Transmettre objectif, périmètre autorisé, limites, sources canoniques, règles retenues, fichiers concernés et résultat attendu. Ne pas supposer un héritage complet du contexte. Coordonner les écritures concurrentes ; le délégataire vérifie les instructions applicables. L'agent responsable examine les contributions et leur intégration : la délégation ne remplace pas la vérification.
+
+*Illustration — contrat partagé :* un champ de DTO peut affecter un écran et un job. Identifier ces consommateurs et les règles correspondantes avant de présenter le plan. Si la prise en charge d'un consommateur supplémentaire sort du périmètre approuvé, soumettre le complément ; déplacer le champ seul ne suffit pas.
+
+## 6. Arbitrages et exceptions
+
+**R01-011 — Distinguer choix et écart.** Choisir une variante déjà admise selon ses critères, dans le plan autorisé. Pour une décision manquante ou une contradiction, présenter le problème concret, les options viables, la recommandation et les conséquences. Pendant l'attente, poursuivre seulement les parties indépendantes déjà autorisées. Une revue demandée par une règle doit être effectuée et justifiée ; elle n'autorise pas à ignorer l'obligation examinée.
+
+**R01-012 — Encadrer les dérogations.** Chercher d'abord une solution conforme. Une exception doit recevoir l'accord du porteur ou d'un responsable explicitement désigné : consigner identifiant de règle, motif, périmètre, risques, compensations éventuelles, approbation et condition de réexamen. L'agent ne s'accorde aucune dérogation et ne modifie pas le contrôle pour masquer l'écart. Les exigences essentielles de sécurité, confidentialité et intégrité nécessitent une modification explicite du cadre concerné ; une exception locale ne peut les assouplir. L'exception acceptée ne change pas la règle générale.
+
+## 7. Vérification et clôture
+
+**R01-013 — Produire des preuves pertinentes.** Distinguer vérifications prévues, exécutées, réussies, échouées et non exécutées. Pour chacune, identifier le contrôle, son résultat et l'état du travail vérifié ; justifier les omissions. Rejouer les contrôles dont une modification invalide la preuve, sans répéter ceux qui restent pertinents. Les règles spécialisées définissent les techniques nécessaires. Des tests unitaires ne prouvent pas une concurrence PostgreSQL ; une déclaration de lecture ne prouve pas la conformité.
+
+**R01-014 — Qualifier la remise.** Déclarer terminé seulement si le résultat convenu est obtenu, les obligations applicables satisfaites, les vérifications nécessaires effectuées, le changement relu et les contrats/documents propriétaires actualisés. Exposer les limites et écarts résiduels. Une preuve essentielle manquante implique une remise à compléter ou pour arbitrage, pas une validation complète. Pour un livrable soumis à approbation, distinguer rédaction achevée, revue effectuée et validation du contenu encore attendue.
+
+## 8. Mémoire et reprise
+
+**R01-015 — Utiliser l'espace de travail.** Conserver les plans d'exécution, cartographies de mission, notes de reprise, audits, journaux de travail et échanges privés avec un agent dans un support privé. Si ce support se trouve dans la copie locale du projet, l'exclure du versionnement et des autres canaux de diffusion concernés, notamment les images et archives distribuées. Retrouver son emplacement dans les instructions applicables ; ne pas publier ces notes dans la documentation pour faciliter leur découverte par un autre intervenant. Reporter uniquement les exigences, contrats, procédures, contraintes et limites actuelles nécessaires au travail dans leurs références propriétaires, sous une forme générale et impersonnelle. Tenir un journal de bord privé est encouragé pour suivre l'avancement, les essais, les décisions de travail et les points à reprendre. Le conserver dans un sous-dossier privé de `project-management/` ou de l'espace de gestion retenu, explicitement ignoré par Git et exclu des images et archives partagées. Il reste un outil personnel, sans obligation de journal pour chaque petite tâche. L'entretien courant du suivi privé d'un travail autorisé ne demande pas une nouvelle approbation administrative ; aucun format ni fichier par petite tâche n'est imposé. Cette liberté respecte le mode actif, n'autorise aucune écriture en mode Plan natif, ni extension d'implémentation ou dérogation.
+
+**R01-016 — Préserver la continuité.** Avant interruption ou transmission significative, conserver dans le support privé l'objectif, le plan approuvé et sa portée, les décisions, l'état réel, les vérifications, les questions ouvertes et la prochaine action autorisée. Distinguer propositions, décisions approuvées, observations et résultats ; à la reprise, les confronter aux sources et instructions actuelles. Les résultats de vérification restent retrouvables dans les outils ou artefacts prévus, avec les références nécessaires dans le suivi privé. Actualiser les documents partagés pour décrire le fonctionnement et les contraintes en vigueur, sans y recopier le déroulement de l'intervention, les échanges d'approbation ou les détails propres à un poste. Avant nettoyage, préserver les décisions applicables, exceptions actives, actions ouvertes, preuves nécessaires et contributions en cours dans leurs supports appropriés ; supprimer, résumer ou archiver le reste dans l'espace privé.

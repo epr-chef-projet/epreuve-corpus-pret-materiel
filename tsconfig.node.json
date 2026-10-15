@@ -1,0 +1,21 @@
+{
+    "$schema": "https://www.schemastore.org/tsconfig.json",
+    "compilerOptions": {
+        "target": "ES2023",
+        "lib": ["ES2023", "DOM"],
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "types": ["node"],
+        "strict": true,
+        "noEmit": true,
+        "skipLibCheck": false,
+        "verbatimModuleSyntax": true,
+        "forceConsistentCasingInFileNames": true
+    },
+    "include": [
+        "vite.config.ts",
+        "vitest.config.ts",
+        "playwright.config.ts",
+        "tests/Browser/**/*.ts"
+    ]
+}

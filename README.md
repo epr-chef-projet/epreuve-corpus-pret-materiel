@@ -12,7 +12,7 @@ Suivre l'[installation](project-management/docs/interne/developpement/installati
 
 ## Utiliser la copie locale
 
-Depuis la racine d'une copie déjà préparée :
+Depuis la racine d’une copie déjà préparée :
 
 ```sh
 ./vendor/bin/sail up -d --wait --wait-timeout 90 --no-build --pull never

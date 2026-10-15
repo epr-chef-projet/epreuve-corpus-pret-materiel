@@ -1,6 +1,6 @@
 # Initialiser un projet Laravel avec Docker et Sail
 
-**Version 1.2 — contenu validé ; parcours opérationnel à exercer.** Commandes et interfaces examinées dans les sources officielles Laravel 13, Inertia 3 et des outils cités. Vérifier leur compatibilité avec les versions retenues avant application ; ce document n'adopte pas ces versions pour le projet.
+**Version 1.3 — contenu validé ; parcours opérationnel à exercer.** Commandes et interfaces examinées dans les sources officielles Laravel 13, Inertia 3 et des outils cités. Vérifier leur compatibilité avec les versions retenues avant application ; ce document n'adopte pas ces versions pour le projet.
 
 **Résultat :** un squelette officiel avec le frontend sélectionné, les services nécessaires raccordés, des dépendances verrouillées et une recette de reprise partageable. Cette procédure crée une base technique, sans fonctionnalités métier, publication GitHub, image de production ou livraison serveur.
 
@@ -154,6 +154,8 @@ pwd -P
 ```
 
 Ouvrir ce dossier dans l'éditeur et vérifier la propriété des fichiers. Conserver la recette d'amorçage partageable, son Dockerfile et ses références dans l'organisation du projet, par exemple `docker/bootstrap/`. Importer maintenant les documents retenus et les points d'entrée des règles, avec chemins adaptés, sans dépendance au poste d'origine. [Installation Sail](https://laravel.com/framework/docs/13.x/sail).
+
+Mettre en place `project-management/` selon la section [« Organiser les références et les points d'entrée »](documentation-et-partage.md#2-organiser-les-références-et-les-points-dentrée) du guide Documentation et partage. Y intégrer les références retenues, préparer le README d'orientation et configurer les exclusions de l'espace privé avant le premier partage.
 
 ## 4. Préparer la configuration avant les consommateurs
 

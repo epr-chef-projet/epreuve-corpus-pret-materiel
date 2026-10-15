@@ -1,4 +1,4 @@
-name: Contrôles natifs de la base
+name: Étapes communes de vérification
 
 on:
     workflow_call:
@@ -44,6 +44,7 @@ jobs:
             PUBLIC_IMAGE: ${{ inputs.image_ref }}
             EXPECTED_IMAGE_ID: ${{ inputs.image_id }}
             EPR_IMAGE: epr-production:gh-${{ github.run_id }}-${{ github.run_attempt }}
+            CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.image_ref == '' }}
         defaults:
             run:
                 shell: bash
@@ -65,6 +66,116 @@ jobs:
                   docker compose version
                   test "$(docker context show)" = default
 
+            - name: Activer le stockage Docker compatible avec les caches BuildKit
+              run: |
+                  if ! docker info --format '{{json .DriverStatus}}' | python3 -c 'import json, sys; sys.exit(not any("io.containerd.snapshotter.v1" in entry for entry in json.load(sys.stdin)))'; then
+                    python3 - <<'PYDOCKER'
+                  import json, os
+                  from pathlib import Path
+                  source = Path('/etc/docker/daemon.json')
+                  config = json.loads(source.read_text()) if source.exists() else {}
+                  config.setdefault('features', {})['containerd-snapshotter'] = True
+                  (Path(os.environ['RUNNER_TEMP']) / 'docker-daemon.json').write_text(json.dumps(config))
+                  PYDOCKER
+                    sudo install -D -m 0644 "$RUNNER_TEMP/docker-daemon.json" /etc/docker/daemon.json
+                    sudo systemctl restart docker
+                  fi
+                  test "$(docker context show)" = default
+                  docker buildx inspect default --bootstrap
+
+            - name: Préparer la configuration et les clés de cache
+              id: prepare
+              run: |
+                  scripts/bootstrap --instance c --run "$EPR_RUN"
+                  mkdir -p .epr-local/downloads/composer/files .epr-local/downloads/npm/_cacache .epr-local/downloads/chromium
+                  cache_day=$(date -u +%F)
+                  printf 'day=%s\n' "$cache_day" >> "$GITHUB_OUTPUT"
+                  printf 'Période du cache système (UTC) : %s\nRunner : %s / %s\n' "$cache_day" "${ImageOS:-unknown}" "${ImageVersion:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+                  sed -n 's/^EPR_RUNTIME_SOURCE="\(.*\)"$/source=\1/p' .env >> "$GITHUB_OUTPUT"
+                  docker compose build --print laravel.test > "$RUNNER_TEMP/runtime-bake.json"
+
+            # Restore-only actions have no post-job save. PRs never execute a cache save.
+            - name: Restaurer les couches Sail
+              id: cache-runtime
+              continue-on-error: true
+              uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+              with:
+                  path: ${{ runner.temp }}/build-cache/runtime
+                  key: ci-v1-sail-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.day }}-${{ steps.prepare.outputs.source }}
+
+            - name: Restaurer les couches de production
+              id: cache-production
+              if: ${{ inputs.image_ref == '' }}
+              continue-on-error: true
+              uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+              with:
+                  path: ${{ runner.temp }}/build-cache/production
+                  key: ci-v1-production-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.day }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('.dockerignore', 'docker/production/**', 'docker/imagick/policy.xml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json') }}
+
+            - name: Restaurer les téléchargements Composer et npm
+              id: cache-downloads
+              continue-on-error: true
+              uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+              with:
+                  path: |
+                      .epr-local/downloads/composer/files
+                      .epr-local/downloads/npm/_cacache
+                  key: ci-v1-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('composer.lock', 'package-lock.json') }}
+
+            - name: Restaurer Chromium pour la version verrouillée de Playwright
+              id: cache-chromium
+              continue-on-error: true
+              uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+              with:
+                  path: .epr-local/downloads/chromium
+                  key: ci-v1-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('package-lock.json') }}
+
+            - name: Écarter les restaurations incomplètes et construire le runtime
+              env:
+                  RUNTIME_RESTORED: ${{ steps.cache-runtime.outcome == 'success' && steps.cache-runtime.outputs.cache-hit == 'true' }}
+                  PRODUCTION_RESTORED: ${{ steps.cache-production.outcome == 'success' && steps.cache-production.outputs.cache-hit == 'true' }}
+                  DOWNLOADS_RESTORED: ${{ steps.cache-downloads.outcome == 'success' && steps.cache-downloads.outputs.cache-hit == 'true' }}
+                  CHROMIUM_RESTORED: ${{ steps.cache-chromium.outcome == 'success' && steps.cache-chromium.outputs.cache-hit == 'true' }}
+                  CACHE_DAY: ${{ steps.prepare.outputs.day }}
+              run: |
+                  [[ "$RUNTIME_RESTORED" == true ]] || rm -rf "$RUNNER_TEMP/build-cache/runtime"
+                  [[ "$PRODUCTION_RESTORED" == true ]] || rm -rf "$RUNNER_TEMP/build-cache/production"
+                  [[ "$DOWNLOADS_RESTORED" == true ]] || rm -rf .epr-local/downloads/composer/files .epr-local/downloads/npm/_cacache
+                  [[ "$CHROMIUM_RESTORED" == true ]] || rm -rf .epr-local/downloads/chromium
+                  python3 - <<'PYCACHE'
+                  import hashlib, json, os, re, shutil
+                  from pathlib import Path
+                  def verify(root, descriptor):
+                      digest = descriptor['digest']
+                      assert re.fullmatch(r'sha256:[0-9a-f]{64}', digest)
+                      path = root / 'blobs' / 'sha256' / digest[7:]
+                      assert not path.is_symlink() and path.stat().st_size == descriptor['size']
+                      with path.open('rb') as stream:
+                          assert hashlib.file_digest(stream, 'sha256').hexdigest() == digest[7:]
+                      if descriptor['mediaType'] in ('application/vnd.oci.image.manifest.v1+json', 'application/vnd.oci.image.index.v1+json'):
+                          manifest = json.loads(path.read_text())
+                          for child in manifest.get('manifests', []) + manifest.get('layers', []) + ([manifest['config']] if 'config' in manifest else []):
+                              verify(root, child)
+                  for name in ('runtime', 'production'):
+                      root = Path(os.environ['RUNNER_TEMP']) / 'build-cache' / name
+                      if not root.exists():
+                          continue
+                      try:
+                          index = json.loads((root / 'index.json').read_text())
+                          assert index['schemaVersion'] == 2 and index['manifests']
+                          for descriptor in index['manifests']:
+                              verify(root, descriptor)
+                      except (OSError, ValueError, KeyError, TypeError, AttributeError, AssertionError):
+                          shutil.rmtree(root)
+                          print(f'{name}: cache rejected; a full build remains required')
+                  PYCACHE
+                  options=(--set "*.args.EPR_CACHE_REFRESH=$CACHE_DAY")
+                  [[ ! -f "$RUNNER_TEMP/build-cache/runtime/index.json" ]] || options+=(--set "*.cache-from=type=local,src=$RUNNER_TEMP/build-cache/runtime")
+                  if [[ "$CACHE_WRITE" == true && "$RUNTIME_RESTORED" != true ]]; then
+                    options+=(--set "*.cache-to=type=local,dest=$RUNNER_TEMP/build-cache-export/runtime,mode=min,ignore-error=true")
+                  fi
+                  docker buildx bake --file "$RUNNER_TEMP/runtime-bake.json" --load --provenance=false "${options[@]}"
+
             - name: Télécharger les services aux références Compose
               id: images
               timeout-minutes: 10
@@ -76,12 +187,10 @@ jobs:
             - name: Préparer la configuration, le runtime et les locks
               id: bootstrap
               run: |
-                  scripts/bootstrap --instance c --run "$EPR_RUN"
-                  docker compose build laravel.test
-                  docker compose run --rm --no-deps --pull never --user "$(id -u):$(id -g)" --entrypoint composer laravel.test install --no-scripts --no-plugins --no-interaction
+                  docker compose run --rm --no-deps --pull never --user "$(id -u):$(id -g)" --env COMPOSER_CACHE_DIR=/var/www/html/.epr-local/downloads/composer --entrypoint composer laravel.test install --no-scripts --no-plugins --no-interaction
                   docker compose -f compose.yaml -f compose.bootstrap.yaml up -d --wait --wait-timeout 90 --no-build --pull never laravel.test pgsql redis mailpit
                   ./vendor/bin/sail composer dump-autoload --no-scripts --no-interaction
-                  ./vendor/bin/sail npm ci --ignore-scripts --engine-strict
+                  ./vendor/bin/sail exec -T --user sail --env NPM_CONFIG_CACHE=/var/www/html/.epr-local/downloads/npm laravel.test npm ci --ignore-scripts --engine-strict
                   ./vendor/bin/sail composer check-platform-reqs
                   ./vendor/bin/sail artisan package:discover --no-interaction
                   for database in laravel testing; do
@@ -139,12 +248,14 @@ jobs:
                   ./vendor/bin/sail composer test:contracts -- --check
                   ./vendor/bin/sail artisan test --compact
                   ./vendor/bin/sail npm run test:unit
-                  ./vendor/bin/sail npm exec --no -- playwright install chromium
-                  ./vendor/bin/sail npm run test:browser
+                  ./vendor/bin/sail exec -T --user sail --env PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.epr-local/downloads/chromium laravel.test npm exec --no -- playwright install chromium
+                  ./vendor/bin/sail exec -T --user sail --env PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.epr-local/downloads/chromium laravel.test npm run test:browser
 
             - name: Construire ou récupérer le livrable exact
               id: image
               timeout-minutes: 20
+              env:
+                  PRODUCTION_RESTORED: ${{ steps.cache-production.outcome == 'success' && steps.cache-production.outputs.cache-hit == 'true' }}
               run: |
                   mkdir -p "$RUNNER_TEMP/image-context" "$RUNNER_TEMP/image-proof"
                   ./vendor/bin/sail exec -T laravel.test cat /usr/bin/composer > "$RUNNER_TEMP/composer.phar"
@@ -168,7 +279,12 @@ jobs:
                   PYRECIPE
                     )
                     printf 'builder=%s\nimageId=%s\n' "$builder" "$builder_id" > "$RUNNER_TEMP/image-proof/frontend-builder.txt"
-                    docker buildx build --platform linux/amd64 --load --provenance=false \
+                    cache_options=()
+                    [[ ! -f "$RUNNER_TEMP/build-cache/production/index.json" ]] || cache_options+=(--cache-from "type=local,src=$RUNNER_TEMP/build-cache/production")
+                    if [[ "$CACHE_WRITE" == true && "$PRODUCTION_RESTORED" != true ]]; then
+                      cache_options+=(--cache-to "type=local,dest=$RUNNER_TEMP/build-cache-export/production,mode=max,ignore-error=true")
+                    fi
+                    docker buildx build --platform linux/amd64 --load --provenance=false "${cache_options[@]}" \
                       --file "$RUNNER_TEMP/image-context/docker/production/Dockerfile" \
                       --build-arg "FRONTEND_BUILD_IMAGE=$builder" --build-arg "RECIPE_SHA256=$recipe" \
                       --build-arg "SOURCE_SHA=$EXPECTED_SOURCE" --build-arg "BUILD_RUN=$GITHUB_RUN_ID" \
@@ -742,3 +858,51 @@ jobs:
                   path: ${{ runner.temp }}/image-proof/
                   retention-days: 90
                   if-no-files-found: error
+
+            - name: Préparer les caches à conserver après réussite
+              if: ${{ success() && env.CACHE_WRITE == 'true' }}
+              continue-on-error: true
+              run: |
+                  for name in runtime production; do
+                    if [[ -f "$RUNNER_TEMP/build-cache-export/$name/index.json" ]]; then
+                      rm -rf "$RUNNER_TEMP/build-cache/$name"
+                      mkdir -p "$RUNNER_TEMP/build-cache"
+                      mv "$RUNNER_TEMP/build-cache-export/$name" "$RUNNER_TEMP/build-cache/$name"
+                    fi
+                  done
+                  du -sh "$RUNNER_TEMP/build-cache/"* .epr-local/downloads/* >> "$GITHUB_STEP_SUMMARY"
+
+            # Explicit saves only: no combined cache action or automatic post-job save.
+            - name: Conserver les couches Sail
+              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.cache-runtime.outputs.cache-hit != 'true' }}
+              continue-on-error: true
+              uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+              with:
+                  path: ${{ runner.temp }}/build-cache/runtime
+                  key: ${{ steps.cache-runtime.outputs.cache-primary-key }}
+
+            - name: Conserver les couches de production
+              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.cache-production.outputs.cache-hit != 'true' }}
+              continue-on-error: true
+              uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+              with:
+                  path: ${{ runner.temp }}/build-cache/production
+                  key: ${{ steps.cache-production.outputs.cache-primary-key }}
+
+            - name: Conserver les téléchargements Composer et npm
+              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.cache-downloads.outputs.cache-hit != 'true' }}
+              continue-on-error: true
+              uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+              with:
+                  path: |
+                      .epr-local/downloads/composer/files
+                      .epr-local/downloads/npm/_cacache
+                  key: ${{ steps.cache-downloads.outputs.cache-primary-key }}
+
+            - name: Conserver Chromium pour la version verrouillée de Playwright
+              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.cache-chromium.outputs.cache-hit != 'true' }}
+              continue-on-error: true
+              uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+              with:
+                  path: .epr-local/downloads/chromium
+                  key: ${{ steps.cache-chromium.outputs.cache-primary-key }}

@@ -45,17 +45,22 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_HOME=/tmp/composer
 FROM ${FRONTEND_BUILD_IMAGE} AS frontend
 USER root
 WORKDIR /var/www/html
+COPY composer.json composer.lock ./
+RUN composer install --no-interaction --prefer-dist --no-progress --no-scripts --no-autoloader
+COPY package.json package-lock.json ./
+RUN npm ci --no-progress
 COPY . .
 RUN mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs \
-    && composer install --no-interaction --prefer-dist --no-progress \
+    && composer dump-autoload --no-interaction --optimize \
     && composer contracts:generate \
-    && npm ci --no-progress \
     && APP_URL=http://build.invalid npm run build
 
 FROM composer AS dependencies
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-interaction --prefer-dist --no-progress --no-scripts --no-autoloader
 COPY . .
 RUN mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs \
-    && composer install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader \
+    && composer dump-autoload --no-dev --no-interaction --optimize \
     && composer check-platform-reqs --no-dev
 
 FROM runtime AS assembled

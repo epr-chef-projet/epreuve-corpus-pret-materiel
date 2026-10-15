@@ -1,4 +1,4 @@
-name: Base — révisions intégrées
+name: Vérifications après fusion
 
 on:
     push:

@@ -1,4 +1,4 @@
-name: Base — propositions
+name: Vérifications des contributions
 
 on:
     pull_request:

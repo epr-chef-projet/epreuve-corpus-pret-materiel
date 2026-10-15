@@ -1,4 +1,4 @@
-name: Image — publication décidée par C
+name: Publication des images
 
 on:
     workflow_dispatch:

@@ -1,6 +1,6 @@
 # Références du projet
 
-Ce dossier regroupe les spécifications et les références nécessaires à l'installation, au développement, aux tests et aux contributions. Le [README racine](../README.md) présente l'application et son état fonctionnel.
+Ce dossier regroupe la documentation et les supports de gestion du projet selon le [guide Documentation et partage](docs/procedures/documentation-et-partage.md#2-organiser-les-références-et-les-points-dentrée). Les références partagées se trouvent dans `docs/` ; les documents locaux privés dans `local/`. Le [README racine](../README.md) présente l'application et son état fonctionnel.
 
 | Besoin                                 | Référence                                                                                                                           |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |

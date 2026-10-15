@@ -1,6 +1,6 @@
 # Organiser, partager et entretenir la documentation
 
-**Version 1.1 — contenu validé ; parcours de remise à exercer.** Commandes examinées dans les sources officielles citées ; vérifier leur compatibilité avec les outils du projet.
+**Version 1.2 — contenu validé ; parcours de remise à exercer.** Commandes examinées dans les sources officielles citées ; vérifier leur compatibilité avec les outils du projet.
 
 **Résultat :** un dépôt dont le README oriente vers des références actuelles, une documentation collective suffisante pour travailler et des procédures réservées transmises seulement aux personnes concernées. Le parcours s'applique à l'initialisation, aux contributions et à la remise d'un projet existant, avec ou sans agent.
 
@@ -26,23 +26,33 @@ La documentation partagée décrit fonctionnalités, architecture, contrats, rec
 
 ## 2. Organiser les références et les points d'entrée
 
-Organiser par thème explicite. Exemple à adapter :
+Dans un dépôt applicatif, regrouper la documentation et les supports de gestion du projet dans `project-management/`. Mettre cette organisation en place lors de l’initialisation et la conserver au fil des contributions.
+
+Le README racine dirige vers `project-management/README.md`. Ce dernier explique le rangement, distingue les documents partagés des documents privés et oriente chaque intervenant vers les références nécessaires à son travail.
 
 ```text
 README.md
-docs/
+project-management/
   README.md
-  specifications/
-  procedures/
-rules/
-  index.md
+  docs/
+    README.md
+    cahiers-des-charges/
+      fonctionnel/
+      technique/
+    interne/
+    procedures/
+  local/
 ```
 
-Définir les chemins selon le projet. Les index orientent vers les références actuelles ; aucune arborescence de plans, suivis, décisions chronologiques ou validations d'intervention n'est ajoutée.
+`project-management/docs/` contient les références partagées : cahiers des charges, architecture, contrats, documentation interne et procédures nécessaires à l’installation, au développement, aux tests et aux contributions.
 
-Employer des liens relatifs et ancres stables, sans dépendance à un chemin ou document privé.
+`project-management/local/` accueille les documents conservés uniquement sur le poste : plans de travail, cartographies personnelles, journaux de bord, notes de reprise et procédures réservées. Ce dossier est ignoré par Git et exclu des images et archives partagées. Son contenu n’est pas nécessaire pour travailler depuis le dépôt partagé. Les documents réservés restent soumis aux protections et habilitations appropriées.
 
-Transférer seulement les références actuelles nécessaires, sans plans, formation personnelle, essais ou journaux. Un enseignement devient une instruction générale, sans récit d'origine. Les [guides d'initialisation](initialisation.md) et [d'environnement Docker](environnement-docker.md) conservent leurs recettes.
+Cette organisation concerne la documentation et le suivi du projet. Le code, les tests, les configurations, les fichiers nécessaires à l’exécution et les fichiers attendus par les outils conservent leurs emplacements techniques. Les règles d’implémentation restent dans leur emplacement de référence et sont accessibles par des liens. Les secrets utilisent le stockage protégé prévu pour eux.
+
+Organiser les documents par thème, sans dupliquer une même information. Créer uniquement les sous-dossiers nécessaires. Les références partagées décrivent le fonctionnement et les contraintes actuels ; les journaux et historiques de travail restent dans l’espace privé.
+
+Employer des liens relatifs et des ancres stables. Lors d’un transfert, sélectionner seulement les références utiles et adapter leurs liens, sans dépendance à un poste ou à un document privé.
 
 ## 3. Préparer le README racine
 
@@ -98,13 +108,13 @@ git diff --cached --name-status
 
 Attendus : racine prévue, fichiers suivis connus et changements préparés examinés. La liste des fichiers suivis et celle des changements préparés sont distinctes ; une vue Git propre ne prouve pas la confidentialité de l'ancien historique.
 
-Si le projet retient, **par exemple**, `project-management/local/` pour le contenu local privé, une règle commune dans le `.gitignore` racine peut être :
+Exclure `project-management/local/` dans le `.gitignore` racine :
 
 ```gitignore
 /project-management/local/
 ```
 
-Adapter ce chemin au profil, préserver les exclusions existantes et les fichiers collectifs attendus. Les exclusions personnelles ou globales d'un poste ne deviennent pas automatiquement celles d'un clone. Pour contrôler un **fichier privé précis**, pas seulement son dossier :
+Préserver les exclusions existantes et les fichiers collectifs attendus. Les exclusions personnelles ou globales d’un poste ne remplacent pas celles distribuées avec le dépôt. Pour contrôler un **fichier privé précis**, pas seulement son dossier :
 
 ```bash
 DOC_PRIVATE_PATH='<chemin-relatif-du-fichier-prive>'
@@ -140,7 +150,7 @@ L'aperçu concerne les références et l'historique disponibles localement ; un 
 
 ### Vérifier aussi les canaux hors Git
 
-Pour Docker, identifier **chaque contexte de construction** et le fichier d'exclusion réellement utilisé. Un `.dockerignore` se lit depuis la racine de son contexte ; lorsqu'un fichier d'exclusion spécifique au Dockerfile existe, il prend priorité sur celui du contexte. Pour un contexte situé à la racine du dépôt, le même exemple privé peut être exclu ainsi :
+Pour Docker, identifier **chaque contexte de construction** et le fichier d'exclusion réellement utilisé. Un `.dockerignore` se lit depuis la racine de son contexte ; lorsqu'un fichier d'exclusion spécifique au Dockerfile existe, il prend priorité sur celui du contexte. Lorsque le contexte Docker contient `project-management/local/`, exclure ce dossier du contexte concerné. Pour un contexte situé à la racine du dépôt :
 
 ```dockerignore
 project-management/local/
@@ -162,7 +172,7 @@ Avant une modification, identifier les consommateurs documentaires : référence
 | Déplacement ou renommage d'un document   | Liens entrants/sortants, index, ancres et copies transmises concernées. Un changement de chemin seul ne rend pas le contenu privé.                                          |
 | Enseignement ou limite affectant l'usage | Actualiser la référence propriétaire avec une instruction générale ou la limite actuelle ; conserver les notes et résultats détaillés dans leurs supports privés ou outils. |
 
-Tenir un journal de bord privé est encouragé pour suivre l'avancement, les essais, les décisions de travail et les points à reprendre. Le conserver dans un sous-dossier privé de `project-management/` ou de l'espace de gestion retenu, explicitement ignoré par Git et exclu des images et archives partagées. Il reste un outil personnel, sans obligation de journal pour chaque petite tâche.
+Tenir un journal de bord privé est encouragé pour suivre l'avancement, les essais, les décisions de travail et les points à reprendre. Le conserver dans `project-management/local/`, ignoré par Git et exclu des images et archives partagées. Il reste un outil personnel, sans obligation de journal pour chaque petite tâche.
 
 Le suivi nécessaire à la continuité reste privé et ignoré. Aucune synthèse de ses actions, aucun journal de commandes ni historique personnalisé n'est ajouté à la documentation partagée.
 

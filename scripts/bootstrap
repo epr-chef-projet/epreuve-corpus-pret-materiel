@@ -29,10 +29,16 @@ exec 9>.epr-local/development.lock
 flock -n 9 || fail 'Another preparation owns this clone.' 5
 check_resources
 set_value() {
-    local setting="$1" content="$2"
+    local setting="$1" content="$2" replacement
     [[ "$content" != *$'\n'* && "$content" != *'"'* && "$content" != *'$('* && "$content" != *$'\x60'* ]] || fail 'Unsupported configuration value.'
-    sed -i "/^$setting=/d" .env
-    printf '%s="%s"\n' "$setting" "$content" >> .env
+    if grep -q "^$setting=" .env; then
+        replacement="${content//\\/\\\\}"
+        replacement="${replacement//&/\\&}"
+        replacement="${replacement//|/\\|}"
+        printf 's|^%s=.*$|%s="%s"|\n' "$setting" "$setting" "$replacement" | sed -i -f - .env
+    else
+        printf '%s="%s"\n' "$setting" "$content" >> .env
+    fi
 }
 random_secret() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
 existing_configuration=true

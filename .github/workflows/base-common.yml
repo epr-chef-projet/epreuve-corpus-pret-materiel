@@ -198,6 +198,7 @@ jobs:
                     if (app()->configurationIsCached() || app()->environment() !== "local" || $identity->session_user !== "epr_migrator" || $identity->current_user !== "epr_owner" || $identity->database !== getenv("DB_DATABASE") || $identity->schema !== "epr" || !in_array($identity->address, gethostbynamel("pgsql") ?: [], true)) { throw new RuntimeException("Migration target refused"); }
                     dump($identity);'
                     ./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$database" migrator migrate --no-interaction
+                    ./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$database" migrator identity-access:prepare-accounts --target="$database" --no-interaction
                     ./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$database" migrator tinker --execute '
                     if (DB::select("select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_roles r on r.oid=c.relowner where n.nspname=? and c.relkind in (?,?,?,?,?) and r.rolname <> ?", ["epr", "r", "p", "S", "v", "m", "epr_owner"])) { throw new RuntimeException("Unexpected SQL object owner"); }'
                   done
@@ -520,6 +521,7 @@ jobs:
                   require "vendor/autoload.php";
                   $source = Dotenv\Dotenv::parse(file_get_contents(".env"));
                   $values = ["IMAGE_APP_KEY" => $source["APP_KEY"], "IMAGE_DB_PASSWORD" => $source["DB_PASSWORD"],
+                    "IMAGE_AUTH_LOOKUP_PASSWORD" => $source["AUTH_LOOKUP_PASSWORD"],
                     "IMAGE_INSTANCE" => $source["EPR_INSTANCE"], "IMAGE_ROOT_FINGERPRINT" => $source["EPR_ROOT_FINGERPRINT"], "IMAGE_APP_URL" => "http://image.invalid:8183",
                     "IMAGE_PUBLIC_HOST" => "image.invalid", "IMAGE_HTTP_PORT" => "8183", "IMAGE_REVERB_PORT" => "8193",
                     "IMAGE_REVERB_KEY" => "image-qualification", "IMAGE_REVERB_SECRET" => bin2hex(random_bytes(32))];

@@ -4,13 +4,15 @@ BEGIN;
 
 REVOKE ALL ON DATABASE :"epr_database" FROM PUBLIC;
 GRANT CONNECT ON DATABASE :"epr_database"
-         TO epr_app, epr_migrator, epr_backup;
+         TO epr_app, epr_migrator, epr_backup, epr_auth_lookup;
 
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 CREATE SCHEMA epr AUTHORIZATION epr_owner;
 REVOKE ALL ON SCHEMA epr FROM PUBLIC;
-GRANT USAGE ON SCHEMA epr TO epr_app, epr_backup;
+GRANT USAGE ON SCHEMA epr TO epr_app, epr_backup, epr_auth_lookup;
+ALTER ROLE epr_auth_lookup IN DATABASE :"epr_database" SET lock_timeout = '2s';
+ALTER ROLE epr_auth_lookup IN DATABASE :"epr_database" SET statement_timeout = '5s';
 
      ALTER ROLE epr_app IN DATABASE :"epr_database"
          SET search_path = epr;

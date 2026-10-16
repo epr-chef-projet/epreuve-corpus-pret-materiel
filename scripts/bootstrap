@@ -2,13 +2,14 @@
 # Initialize private clone settings only. Installation and lifecycle use Docker/Sail.
 source "$(dirname -- "${BASH_SOURCE[0]}")/environment.sh"
 umask 077
-instance='' run_name='' offset=0
+instance='' run_name='' offset=0 add_auth_lookup=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --instance) instance="${2:?Missing instance}"; shift 2;;
         --run) run_name="${2:?Missing run}"; shift 2;;
         --port-offset) offset="${2:?Missing port offset}"; shift 2;;
-        *) fail 'Usage: scripts/bootstrap --instance a|b|c [--run name] [--port-offset number]' 2;;
+        --add-auth-lookup) add_auth_lookup=true; shift;;
+        *) fail 'Usage: scripts/bootstrap --instance a|b|c [--run name] [--port-offset number] [--add-auth-lookup]' 2;;
     esac
 done
 [[ "$instance" =~ ^[abc]$ && "$offset" =~ ^[0-9]{1,4}$ ]] || fail 'Explicit instance and numeric port offset required.' 2
@@ -28,10 +29,16 @@ exec 9>.epr-local/development.lock
 flock -n 9 || fail 'Another preparation owns this clone.' 5
 check_resources
 set_value() {
-    local setting="$1" content="$2"
+    local setting="$1" content="$2" replacement
     [[ "$content" != *$'\n'* && "$content" != *'"'* && "$content" != *'$('* && "$content" != *$'\x60'* ]] || fail 'Unsupported configuration value.'
-    sed -i "/^$setting=/d" .env
-    printf '%s="%s"\n' "$setting" "$content" >> .env
+    if grep -q "^$setting=" .env; then
+        replacement="${content//\\/\\\\}"
+        replacement="${replacement//&/\\&}"
+        replacement="${replacement//|/\\|}"
+        printf 's|^%s=.*$|%s="%s"|\n' "$setting" "$setting" "$replacement" | sed -i -f - .env
+    else
+        printf '%s="%s"\n' "$setting" "$content" >> .env
+    fi
 }
 random_secret() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
 existing_configuration=true
@@ -47,7 +54,7 @@ if [[ ! -e .env ]]; then
     [[ ! -e "$(dirname -- "$secret_directory")" || "$(stat -c %u "$(dirname -- "$secret_directory")")" == "$(id -u)" ]] || fail 'Foreign secret parent.'
     mkdir -p -m 700 "$secret_directory"
     chmod 700 "$(dirname -- "$secret_directory")"
-    for role in BOOTSTRAP APP MIGRATOR BACKUP; do
+    for role in BOOTSTRAP APP MIGRATOR BACKUP AUTH_LOOKUP; do
         secret_file="$secret_directory/${role,,}.password"
         printf '%s\n' "$(random_secret)" > "$secret_file"
         chmod 444 "$secret_file"
@@ -65,6 +72,7 @@ if [[ ! -e .env ]]; then
     set_value REVERB_PUBLIC_PORT "$((8090+number+10#$offset))"
     set_value APP_URL "http://$task_project.localhost:$(value APP_PORT)"
     set_value DB_PASSWORD "$(head -c 64 "$(value POSTGRES_APP_PASSWORD_FILE)")"
+    set_value AUTH_LOOKUP_PASSWORD "$(head -c 64 "$(value POSTGRES_AUTH_LOOKUP_PASSWORD_FILE)")"
     set_value SESSION_COOKIE "${task_project//-/_}_session"
     set_value REDIS_PREFIX "${task_project//-/_}_database_"
     set_value REVERB_APP_ID "$task_project"
@@ -74,6 +82,15 @@ if [[ ! -e .env ]]; then
 fi
 [[ "$(value EPR_INSTANCE)" == "$instance" && "$(value COMPOSE_PROJECT_NAME)" == "$task_project" ]] || fail 'Existing clone identity differs; preserve it.'
 if [[ "$existing_configuration" == true ]]; then
+    if [[ "$add_auth_lookup" == true && -z "$(value POSTGRES_AUTH_LOOKUP_PASSWORD_FILE)" && -z "$(value AUTH_LOOKUP_PASSWORD)" ]]; then
+        check_configuration true
+        secret_file="$(dirname -- "$(value POSTGRES_APP_PASSWORD_FILE)")/auth_lookup.password"
+        [[ ! -e "$secret_file" && ! -L "$secret_file" ]] || fail 'Existing authentication secret preserved for inspection.'
+        printf '%s\n' "$(random_secret)" > "$secret_file"
+        chmod 444 "$secret_file"
+        set_value POSTGRES_AUTH_LOOKUP_PASSWORD_FILE "$secret_file"
+        set_value AUTH_LOOKUP_PASSWORD "$(head -c 64 "$secret_file")"
+    fi
     check_configuration
     printf '%s\n' 'Existing configuration, keys and secrets preserved. Follow the installation procedure if dependencies changed.'
     exit 0

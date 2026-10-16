@@ -5,37 +5,24 @@ declare(strict_types=1);
 namespace Tests\Feature\Auth;
 
 use Illuminate\Foundation\Testing\DatabaseTransactions;
-use Laravel\Fortify\Features;
+use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;
 
 class RegistrationTest extends TestCase
 {
     use DatabaseTransactions;
 
-    protected function setUp(): void
+    public function test_get_register_is_not_exposed(): void
     {
-        parent::setUp();
-
-        $this->skipUnlessFortifyHas(Features::registration());
+        $this->get('/register')->assertNotFound();
+        Accounts::signIn($this);
+        $this->get('/register')->assertNotFound();
     }
 
-    public function test_registration_screen_can_be_rendered(): void
+    public function test_post_register_is_not_exposed(): void
     {
-        $response = $this->get(route('register'));
-
-        $response->assertOk();
-    }
-
-    public function test_new_users_can_register(): void
-    {
-        $response = $this->post(route('register.store'), [
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-            'password' => 'password',
-            'password_confirmation' => 'password',
-        ]);
-
-        $this->assertAuthenticated();
-        $response->assertRedirect(route('dashboard', absolute: false));
+        $this->post('/register')->assertNotFound();
+        Accounts::signIn($this);
+        $this->post('/register')->assertNotFound();
     }
 }

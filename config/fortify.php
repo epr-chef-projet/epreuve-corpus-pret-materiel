@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-use Laravel\Fortify\Features;
-
 return [
 
     /*
@@ -47,7 +45,7 @@ return [
     |
     */
 
-    'username' => 'email',
+    'username' => 'login',
 
     'email' => 'email',
 
@@ -168,26 +166,6 @@ return [
     |
     */
 
-    'features' => [
-        /* @chisel-registration */
-        Features::registration(),
-        /* @end-chisel-registration */
-        Features::resetPasswords(),
-        /* @chisel-email-verification */
-        Features::emailVerification(),
-        /* @end-chisel-email-verification */
-        /* @chisel-2fa */
-        Features::twoFactorAuthentication([
-            'confirm' => true,
-            'confirmPassword' => true,
-            // 'window' => 0
-        ]),
-        /* @end-chisel-2fa */
-        /* @chisel-passkeys */
-        Features::passkeys([
-            'confirmPassword' => true,
-        ]),
-        /* @end-chisel-passkeys */
-    ],
+    'features' => [],
 
 ];

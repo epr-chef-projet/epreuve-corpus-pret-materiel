@@ -4,7 +4,7 @@ import TwoFactorQrCode from '@/components/TwoFactorQrCode.vue';
 import { echoKey } from '@/shared/realtime';
 
 defineOptions({ name: 'FoundationProbePage' });
-const props = defineProps<{ probeUserId: number; csrfToken: string }>();
+const props = defineProps<{ probeUserId: string; csrfToken: string }>();
 const echo = inject(echoKey);
 const subscribed = ref(false);
 const received = ref(false);

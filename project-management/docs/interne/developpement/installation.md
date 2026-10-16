@@ -1,6 +1,6 @@
 # Installation et utilisation de la base
 
-**Version 0.8.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
+**Version 0.9.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
 
 Le projet comprend Laravel, Fortify, Inertia, Vue et les écrans d'authentification, avec les services retenus. Un clone reçoit les sources et leurs locks, sans nouvelle acquisition du kit. Les fonctionnalités et leurs contrats relèvent des [spécifications](../../cahiers-des-charges/fonctionnel/README.md) et des [contrats de modules](../architecture/contrats-et-lots.md).
 
@@ -74,19 +74,32 @@ Attendus : générés disponibles, manifeste Vite compilé, huit services démar
 
 L’amorçage crée `.env` en mode `0600`, lié à la racine et à l'identité. Il prépare `APP_KEY` seulement si elle manque. Les origines HTTP/Vite/Reverb, cookies et préfixes Redis sont propres à l'instance. Préserver ces fichiers et la clé après arrêt ou interruption.
 
-Les quatre secrets PostgreSQL sont créés hors racine applicative, sous `../.secrets/<projet>/`, dans un dossier privé. Les montages individuels permettent leur lecture par les processus concernés. Ne pas déplacer ces fichiers ou modifier leurs droits indistinctement ; l'application reçoit seulement son secret métier et les secrets privilégiés ne sont pas montés dans le service PHP ordinaire.
+Les cinq secrets PostgreSQL sont créés hors racine applicative, sous `../.secrets/<projet>/`, dans un dossier privé. Les montages individuels permettent leur lecture par les processus concernés. Ne pas déplacer ces fichiers ou modifier leurs droits indistinctement ; l'application reçoit ses secrets métier et de recherche d'identité et les secrets privilégiés ne sont pas montés dans le service PHP ordinaire.
 
-| Rôle SQL        | Responsabilité                                           |
-| --------------- | -------------------------------------------------------- |
-| `epr_bootstrap` | Initialisation du cluster ; jamais compte HTTP ou worker |
-| `epr_owner`     | Propriété du schéma et des objets, sans connexion        |
-| `epr_migrator`  | Migrations dédiées, prend le rôle propriétaire           |
-| `epr_app`       | Accès applicatif restreint, sans contournement RLS       |
-| `epr_backup`    | Sauvegarde globale, sans usage métier                    |
+| Rôle SQL          | Responsabilité                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------- |
+| `epr_bootstrap`   | Initialisation du cluster ; jamais compte HTTP ou worker                              |
+| `epr_owner`       | Propriété du schéma et des objets, sans connexion                                     |
+| `epr_migrator`    | Migrations dédiées, prend le rôle propriétaire                                        |
+| `epr_app`         | Accès applicatif restreint, sans contournement RLS                                    |
+| `epr_auth_lookup` | Connexion préatelier et sessions par capacités étroites, sans accès direct aux tables |
+| `epr_backup`      | Sauvegarde globale, sans usage métier                                                 |
 
-Les sources sont `docker/pgsql/20-bootstrap.sh`, ses SQL et le service Compose `migrator`. Les scripts d'entrée PostgreSQL initialisent seulement un volume neuf. Les migrations vérifient base, schéma, session migrateur et propriétaire effectifs ; aucun cache privilégié n'est partagé avec HTTP ou Horizon. Ces rôles ne réalisent pas les futures politiques RLS ou capacités IdentityAccess.
+Les sources sont `docker/pgsql/20-bootstrap.sh`, ses SQL et le service Compose `migrator`. Les scripts d'entrée PostgreSQL initialisent seulement un volume neuf. Les migrations vérifient base, schéma, session migrateur et propriétaire effectifs ; aucun cache privilégié n'est partagé avec HTTP ou Horizon. IdentityAccess fournit ses capacités SQL dédiées ; les politiques RLS des tables métier sont introduites avec leurs modules.
 
 PostgreSQL, Redis, fichiers et clés persistent après arrêt. Un volume existant sans configuration correspondante est refusé pour inspection. Si `.epr-local/compose.volumes.yaml` adapte les labels de volumes existants, vérifier son contenu exact ; cette surcharge ne doit changer ni montage, ni donnée, ni secret et n'est pas requise par un clone neuf. Ne pas supprimer un volume pour forcer l'initialisation ; une réparation particulière PostgreSQL nécessite une proposition et un accord avant intervention.
+
+### Ajouter le rôle de connexion à une installation existante
+
+Avant les commandes Sail d'une copie ne possédant pas encore `AUTH_LOOKUP_PASSWORD`, ajouter uniquement ses nouveaux paramètres privés avec l'instance attribuée :
+
+```sh
+scripts/bootstrap --instance a --add-auth-lookup
+./vendor/bin/sail up -d --no-build --pull never pgsql
+./vendor/bin/sail exec -T pgsql bash /opt/epr-postgres-bootstrap/provision-auth-lookup.sh
+```
+
+Remplacer `a` par l'instance reçue. Le bootstrap vérifie l'ancienne configuration et conserve clé, secrets et données ; il crée le seul secret manquant, hors clone. La dernière commande utilise l'identité d'initialisation uniquement dans PostgreSQL : elle crée ou contrôle `epr_auth_lookup`, lui attribue son propre mot de passe et les seuls accès aux bases/schéma. Elle ne rejoue pas `roles.sql` ni `database.sql`, ne modifie aucun autre rôle et ne réinitialise pas le volume. Un rôle existant avec des privilèges inattendus provoque un refus. Une nouvelle installation reçoit directement les cinq secrets et le rôle.
 
 ### Migrer avec l’identité réservée
 
@@ -114,6 +127,23 @@ if (DB::select("select c.relname from pg_class c join pg_namespace n on n.oid=c.
 ```
 
 Attendus : migrations appliquées ou aucune migration en attente, objets possédés par `epr_owner`. Exécuter cette séquence pour chacune des deux bases à l’installation, puis seulement lorsque les migrations changent. Elle ne fait ni reset ni semis. Les tests emploient ensuite `epr_app`, sans droits DDL ; les tests transactionnels ne relancent pas les migrations.
+
+### Préparer explicitement les comptes synthétiques
+
+Après les migrations, sur une cible locale autorisée vide uniquement, initialiser séparément les huit comptes de `laravel` et ceux de `testing` :
+
+```sh
+./vendor/bin/sail --profile tools run --rm --no-deps -T migrator identity-access:prepare-accounts --target=laravel --no-interaction
+./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE=testing migrator identity-access:prepare-accounts --target=testing --no-interaction
+```
+
+Chaque cible reçoit deux ateliers avec responsable, agent et deux emprunteurs. Ces huit comptes de démonstration utilisent tous le mot de passe `password`, uniquement pour ces cibles locales. Leurs identifiants et le mot de passe sont également fournis dans `.epr-local/identity-laravel.json` ou `identity-testing.json`, en lecture privée locale. Les mots de passe sont hachés en base par Laravel. La préparation exige l'environnement `local`, la session migratrice et le rôle propriétaire ; HTTP et les tests n'acquièrent aucun droit de création de comptes. Aucun semis global n'est exécuté au lancement des tests.
+
+Une répétition sur une cible peuplée ou un reçu déjà présent est refusée, sans changement de compte ou de mot de passe. Le reçu privé est écrit et synchronisé avant la transaction SQL : après interruption, conserver le reçu et comparer la cible avant toute reprise ; sa présence seule ne prouve pas le commit. La transition d'une ancienne base contenant des comptes exige leur correspondance explicite selon EPR-T-018 ; ne pas supprimer les lignes pour franchir la garde.
+
+### SMTP de développement
+
+Le SMTP de développement utilise Mailpit : `MAIL_MAILER=smtp`, `MAIL_HOST=mailpit`, `MAIL_PORT=1025`, sans identifiant externe. Les messages restent capturés localement. Aucun parcours métier du noyau ne déclenche d'email ; les essais gardent leurs transports isolés.
 
 ## 4. Travailler au quotidien
 

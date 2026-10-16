@@ -170,8 +170,13 @@ jobs:
                           print(f'{name}: cache rejected; a full build remains required')
                   PYCACHE
                   options=(--set "*.args.EPR_CACHE_REFRESH=$CACHE_DAY")
-                  [[ ! -f "$RUNNER_TEMP/build-cache/runtime/index.json" ]] || options+=(--set "*.cache-from=type=local,src=$RUNNER_TEMP/build-cache/runtime")
+                  if [[ -f "$RUNNER_TEMP/build-cache/runtime/index.json" ]]; then
+                    options+=(--allow "fs.read=$RUNNER_TEMP/build-cache/runtime")
+                    options+=(--set "*.cache-from=type=local,src=$RUNNER_TEMP/build-cache/runtime")
+                  fi
                   if [[ "$CACHE_WRITE" == true && "$RUNTIME_RESTORED" != true ]]; then
+                    mkdir -p "$RUNNER_TEMP/build-cache-export/runtime"
+                    options+=(--allow "fs.write=$RUNNER_TEMP/build-cache-export/runtime")
                     options+=(--set "*.cache-to=type=local,dest=$RUNNER_TEMP/build-cache-export/runtime,mode=min,ignore-error=true")
                   fi
                   docker buildx bake --file "$RUNNER_TEMP/runtime-bake.json" --load --provenance=false "${options[@]}"

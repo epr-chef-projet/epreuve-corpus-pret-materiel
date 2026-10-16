@@ -1,6 +1,6 @@
 # Préparer GitHub, contribuer et recevoir la version commune
 
-**Version 1.1 — contenu validé ; parcours opérationnel à exercer.** Commandes et capacités examinées dans les sources officielles citées ; vérifier les outils, l'offre et les droits réellement disponibles avant application.
+**Version 1.2 — contenu validé ; parcours opérationnel à exercer.** Commandes et capacités examinées dans les sources officielles citées ; vérifier les outils, l'offre et les droits réellement disponibles avant application.
 
 **Résultat :** un dépôt identifiable, des accès et contrôles reçus, des contributions revues selon les responsabilités, puis une révision intégrée dont la CI est vérifiée. Ce parcours concerne les projets retenant GitHub et le circuit validation locale préalable → CI → intégration contrôlée. Il s'arrête à la version commune vérifiée ; image, registre et déploiement ont leurs procédures propres.
 
@@ -150,6 +150,8 @@ Recevoir le SHA publié et l'identité effective du compte ayant publié. Les an
 
 La recette CI versionnée définit déclencheurs, runner, versions et services, profils d'essai, commandes, résultats requis et conservation. Elle reprend les garanties locales avec les différences de profil explicites ; ne pas copier les scripts d'un starter ni importer un nombre fixe de contrôles.
 
+Pour chaque workflow utilisable, la notice indique son nom affiché, son déclenchement automatique ou son point de lancement manuel, les entrées à renseigner et où trouver leurs valeurs, puis le résultat attendu et les points d'arrêt. Les noms permettent de distinguer vérification d'une proposition, vérification après intégration et publication ; ils ne remplacent pas cette notice.
+
 | Phase CI               | Préparation et réception                                                                                                                                                                                                                                    |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Résoudre les sources   | Action de checkout identifiée par SHA qualifié ; relever le commit effectivement contrôlé. Pour une PR, le checkout par défaut vise la fusion synthétique ; sur `push` de la branche commune, recevoir le commit intégré.                                   |
@@ -161,6 +163,14 @@ La recette CI versionnée définit déclencheurs, runner, versions et services, 
 Les scripts communs existants peuvent exposer les contrôles ; leur runtime et leur portée viennent des manifestes et de la recette, pas d'un nom `check` inventé. Employer les commandes conventionnelles et ne pas ajouter un orchestrateur spécifique sans valeur justifiée. Délais et capacité de l'offre sont reçus ; les caches gardent des entrées et droits maîtrisés et ne remplacent pas l'exécution requise.
 
 Les PR non fiables ne reçoivent pas les credentials de publication ou de production. Protéger les évolutions des workflows et de leurs sources ; identifier actions tierces et permissions. Ne pas exécuter leur code dans un contexte privilégié tel que `pull_request_target` avec des secrets. Un runner persistant ou son socket Docker peut partager un état : recevoir son isolation avant usage. [Sécurité Actions](https://docs.github.com/en/actions/reference/security/secure-use).
+
+### Qualifier les opérations conditionnelles et les caches
+
+Identifier les opérations et droits qui diffèrent entre une PR, une intégration et un lancement manuel. Exercer les opérations propres à chaque parcours dans un périmètre de qualification hors production, avec leurs conditions et permissions effectives. Une PR réussie ne prouve pas le fonctionnement d'une étape exécutée uniquement après intégration. Ne pas accorder à une PR l'écriture dans un cache partagé ou l'accès à des credentials réservés pour contourner cette différence.
+
+Pour chaque cache retenu, vérifier sa première création, sa restauration et le repli après absence ou indisponibilité. Les clés, le rafraîchissement et les droits doivent empêcher la réutilisation d'un contenu incompatible ou non autorisé ; secrets, configurations privées, données et résultats de contrôle restent exclus. Un cache inutilisable entraîne la préparation normale, sans neutraliser un échec de construction, de test ou de contrôle. Ne pas considérer un résultat de contrôle conservé comme une nouvelle exécution.
+
+Comparer une exécution sans restauration de cache et une exécution avec cache à révision identique, avec paramètres, outils, fraîcheur des sources et conditions d'exécution comparables. Inclure restauration, validation des contenus, construction, enregistrement et transferts dans la durée totale, ainsi que le stockage consommé. Conserver les caches dont le gain net justifie le coût et la maintenance ; aucun cache d'outil ni rythme de rafraîchissement n'est imposé par principe. Conserver les mesures et leurs limites dans les outils et artefacts de validation prévus, ou dans le suivi privé ; la recette partagée décrit le fonctionnement retenu.
 
 ### Refuser aussi les contrôles sautés
 

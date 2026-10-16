@@ -12,6 +12,9 @@ on:
             image_id:
                 type: string
                 default: ''
+            image_config_digest:
+                type: string
+                default: ''
             store_archive:
                 type: boolean
                 default: false
@@ -43,6 +46,7 @@ jobs:
             EXPECTED_SOURCE: ${{ inputs.source_sha || github.sha }}
             PUBLIC_IMAGE: ${{ inputs.image_ref }}
             EXPECTED_IMAGE_ID: ${{ inputs.image_id }}
+            EXPECTED_IMAGE_CONFIG_DIGEST: ${{ inputs.image_config_digest }}
             EPR_IMAGE: epr-production:gh-${{ github.run_id }}-${{ github.run_attempt }}
             CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.image_ref == '' }}
         defaults:
@@ -122,26 +126,16 @@ jobs:
                       .epr-local/downloads/npm/_cacache
                   key: ci-v1-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('composer.lock', 'package-lock.json') }}
 
-            - name: Restaurer Chromium pour la version verrouillée de Playwright
-              id: cache-chromium
-              continue-on-error: true
-              uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-              with:
-                  path: .epr-local/downloads/chromium
-                  key: ci-v1-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('package-lock.json') }}
-
             - name: Écarter les restaurations incomplètes et construire le runtime
               env:
                   RUNTIME_RESTORED: ${{ steps.cache-runtime.outcome == 'success' && steps.cache-runtime.outputs.cache-hit == 'true' }}
                   PRODUCTION_RESTORED: ${{ steps.cache-production.outcome == 'success' && steps.cache-production.outputs.cache-hit == 'true' }}
                   DOWNLOADS_RESTORED: ${{ steps.cache-downloads.outcome == 'success' && steps.cache-downloads.outputs.cache-hit == 'true' }}
-                  CHROMIUM_RESTORED: ${{ steps.cache-chromium.outcome == 'success' && steps.cache-chromium.outputs.cache-hit == 'true' }}
                   CACHE_DAY: ${{ steps.prepare.outputs.day }}
               run: |
                   [[ "$RUNTIME_RESTORED" == true ]] || rm -rf "$RUNNER_TEMP/build-cache/runtime"
                   [[ "$PRODUCTION_RESTORED" == true ]] || rm -rf "$RUNNER_TEMP/build-cache/production"
                   [[ "$DOWNLOADS_RESTORED" == true ]] || rm -rf .epr-local/downloads/composer/files .epr-local/downloads/npm/_cacache
-                  [[ "$CHROMIUM_RESTORED" == true ]] || rm -rf .epr-local/downloads/chromium
                   python3 - <<'PYCACHE'
                   import hashlib, json, os, re, shutil
                   from pathlib import Path
@@ -298,7 +292,16 @@ jobs:
                     [[ "$PUBLIC_IMAGE" =~ ^ghcr.io/epr-chef-projet/epreuve-corpus-pret-materiel@sha256:[a-f0-9]{64}$ ]]
                     mkdir -p "$RUNNER_TEMP/anonymous-docker"
                     DOCKER_CONFIG="$RUNNER_TEMP/anonymous-docker" docker pull --platform linux/amd64 "$PUBLIC_IMAGE"
-                    test "$(docker image inspect --format '{{.Id}}' "$PUBLIC_IMAGE")" = "$EXPECTED_IMAGE_ID"
+                    DOCKER_CONFIG="$RUNNER_TEMP/anonymous-docker" docker buildx imagetools inspect --raw "$PUBLIC_IMAGE" > "$RUNNER_TEMP/image-proof/public-manifest.json"
+                    python3 - <<'PYPUBLIC'
+                  import hashlib, json, os, re
+                  from pathlib import Path
+                  data = (Path(os.environ['RUNNER_TEMP']) / 'image-proof/public-manifest.json').read_bytes()
+                  assert re.fullmatch(r'sha256:[a-f0-9]{64}', os.environ['EXPECTED_IMAGE_ID'])
+                  assert re.fullmatch(r'sha256:[a-f0-9]{64}', os.environ['EXPECTED_IMAGE_CONFIG_DIGEST'])
+                  assert 'sha256:' + hashlib.sha256(data).hexdigest() == os.environ['PUBLIC_IMAGE'].split('@')[1]
+                  assert json.loads(data)['config']['digest'] == os.environ['EXPECTED_IMAGE_CONFIG_DIGEST']
+                  PYPUBLIC
                     docker tag "$PUBLIC_IMAGE" "$EPR_IMAGE"
                   fi
                   test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$EPR_IMAGE")" = "$EXPECTED_SOURCE"
@@ -697,6 +700,64 @@ jobs:
                   docker image save "$EPR_IMAGE" | gzip -1 > "$RUNNER_TEMP/image.tar.gz"
                   sha256sum "$RUNNER_TEMP/image.tar.gz" | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/image-proof/archive.sha256"
                   stat -c %s "$RUNNER_TEMP/image.tar.gz" > "$RUNNER_TEMP/image-proof/archive-bytes.txt"
+                  python3 - <<'PYIDENTITY'
+                  import json, os
+                  from pathlib import Path
+                  def archive_identity(archive, image):
+                      import gzip, hashlib, re, tarfile
+                      defaults = {'Hostname': '', 'Domainname': '', 'Image': '', 'AttachStdin': False, 'AttachStdout': False, 'AttachStderr': False, 'Tty': False, 'OpenStdin': False, 'StdinOnce': False, 'Volumes': None, 'OnBuild': None}
+                      with tarfile.open(archive, 'r:gz') as tar:
+                          members = tar.getmembers()
+                          assert len({m.name for m in members}) == len(members), 'Duplicate archive member'
+                          def read(name):
+                              assert tar.getmember(name).isfile(), 'Archive member must be a regular file'
+                              return tar.extractfile(name)
+                          manifest = json.load(read('manifest.json'))
+                          assert len(manifest) == 1, 'Expected one image in the archive'
+                          entry = manifest[0]
+                          assert len(entry['RepoTags']) == 1
+                          config_bytes = read(entry['Config']).read()
+                          config_digest = 'sha256:' + hashlib.sha256(config_bytes).hexdigest()
+                          assert entry['Config'] in ['blobs/sha256/' + config_digest[7:], config_digest[7:] + '.json']
+                          config = json.loads(config_bytes)
+                          assert config['os'] == image['Os'] == 'linux' and config['architecture'] == image['Architecture'] == 'amd64'
+                          assert defaults | config['config'] == defaults | image['Config'], 'Archive configuration differs'
+                          assert config['rootfs']['type'] == image['RootFS']['Type'] == 'layers'
+                          assert config['rootfs']['diff_ids'] == image['RootFS']['Layers'], 'Archive layers differ'
+                          assert len(entry['Layers']) == len(config['rootfs']['diff_ids'])
+                          descriptors = []
+                          for name, diff_id in zip(entry['Layers'], config['rootfs']['diff_ids']):
+                              with read(name) as stream:
+                                  digest = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
+                              assert name == 'blobs/sha256/' + digest[7:]
+                              with read(name) as stream:
+                                  compressed = stream.read(2) == b'\x1f\x8b'
+                              with read(name) as stream:
+                                  content = gzip.GzipFile(fileobj=stream) if compressed else stream
+                                  assert 'sha256:' + hashlib.file_digest(content, 'sha256').hexdigest() == diff_id, 'Layer content differs'
+                              descriptors.append({'digest': digest, 'size': tar.getmember(name).size})
+                          docker_ids = [config_digest]
+                          if 'index.json' in {m.name for m in members}:
+                              index = json.load(read('index.json'))
+                              assert len(index['manifests']) == 1
+                              descriptor = index['manifests'][0]
+                              assert re.fullmatch(r'sha256:[a-f0-9]{64}', descriptor['digest'])
+                              data = read('blobs/sha256/' + descriptor['digest'][7:]).read()
+                              assert 'sha256:' + hashlib.sha256(data).hexdigest() == descriptor['digest'] and len(data) == descriptor['size']
+                              native = json.loads(data)
+                              assert native['config']['digest'] == config_digest and native['config']['size'] == len(config_bytes)
+                              assert [{'digest': d['digest'], 'size': d['size']} for d in native['layers']] == descriptors
+                              docker_ids.append(descriptor['digest'])
+                          assert image['Id'] in docker_ids, 'Docker ID is not bound to this archive'
+                          return {'dockerId': image['Id'], 'configDigest': config_digest, 'archiveDockerIds': docker_ids, 'reference': entry['RepoTags'][0], 'rootfs': image['RootFS']}
+                  root = Path(os.environ['RUNNER_TEMP'])
+                  image = json.loads((root / 'image-proof/image-inspect.json').read_text())[0]
+                  identity = archive_identity(root / 'image.tar.gz', image)
+                  assert identity['reference'] == os.environ['EPR_IMAGE']
+                  if os.environ['PUBLIC_IMAGE']:
+                      assert identity['configDigest'] == os.environ['EXPECTED_IMAGE_CONFIG_DIGEST']
+                  (root / 'image-proof/image-identity.json').write_text(json.dumps(identity, indent=2) + '\n')
+                  PYIDENTITY
 
             - name: Arrêter réellement chaque rôle image
               id: image_stop
@@ -816,6 +877,9 @@ jobs:
                   $pdf = is_file($pdfPath) ? json_decode(file_get_contents($pdfPath), true, 512, JSON_THROW_ON_ERROR) : [];
                   $image = is_file($imagePath) ? json_decode(file_get_contents($imagePath), true, 512, JSON_THROW_ON_ERROR)[0] : [];
                   $imageId = $image['Id'] ?? null;
+                  $identityPath = getenv('EPR_IMAGE_PROOF').'/image-identity.json';
+                  $identity = is_file($identityPath) ? json_decode(file_get_contents($identityPath), true, 512, JSON_THROW_ON_ERROR) : [];
+                  $identityValid = ($identity['dockerId'] ?? null) === $imageId && preg_match('/^sha256:[a-f0-9]{64}$/D', $identity['configDigest'] ?? '') === 1;
                   $mediaValid = is_string($imageId) && ($media['imageId'] ?? null) === $imageId && ($pdf['imageId'] ?? null) === $imageId
                       && ($media['sourceSha'] ?? null) === getenv('EXPECTED_SOURCE') && ($pdf['sourceSha'] ?? null) === getenv('EXPECTED_SOURCE')
                       && ($media['nativeExit'] ?? null) === 0 && ($pdf['nativeExit'] ?? null) === 0
@@ -828,14 +892,14 @@ jobs:
                       && ($prepared['image'] ?? null) === getenv('RECEIPT_RUNTIME')
                       && ($prepared['source'] ?? null) === getenv('RECEIPT_SOURCE')
                       && is_file('.epr-local/image-checked') && is_file('.epr-local/image-stopped') && is_file('.epr-local/stopped')
-                      && $mediaValid
+                      && $mediaValid && $identityValid
                       && array_column($checks, 'control') === $expected
                       && count(array_filter($checks, fn ($row) => $row['nativeExit'] !== 0)) === 0;
                   $receipt = ['repository' => getenv('GITHUB_REPOSITORY'), 'workflowRef' => getenv('GITHUB_WORKFLOW_REF'),
                       'workflowSha' => getenv('GITHUB_WORKFLOW_SHA'), 'sha' => getenv('RECEIPT_SHA'), 'expectedSha' => getenv('EXPECTED_SOURCE'),
                       'run' => getenv('GITHUB_RUN_ID'), 'attempt' => getenv('GITHUB_RUN_ATTEMPT'), 'profile' => 'local',
                       'project' => $prepared['project'] ?? null, 'stages' => $stages, 'required' => $expected, 'checks' => $checks,
-                      'validated' => $valid, 'imageId' => $imageId, 'mediaValidated' => $mediaValid, 'runtimeId' => getenv('RECEIPT_RUNTIME'), 'runtimeSource' => getenv('RECEIPT_SOURCE'),
+                      'validated' => $valid, 'imageId' => $imageId, 'configDigest' => $identity['configDigest'] ?? null, 'mediaValidated' => $mediaValid, 'runtimeId' => getenv('RECEIPT_RUNTIME'), 'runtimeSource' => getenv('RECEIPT_SOURCE'),
                       'locks' => array_combine(['composer.lock', 'package-lock.json'], array_map('hash_file', ['sha256', 'sha256'], ['composer.lock', 'package-lock.json']))];
                   file_put_contents('.epr-local/base-receipt.json', json_encode($receipt, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n");
                   file_put_contents('.epr-local/receipt-output', 'validated='.($valid ? 'true' : 'false')."\nsha=".$receipt['sha']."\nrun=".$receipt['run']."\nattempt=".$receipt['attempt']."\n");
@@ -875,7 +939,7 @@ jobs:
                       mv "$RUNNER_TEMP/build-cache-export/$name" "$RUNNER_TEMP/build-cache/$name"
                     fi
                   done
-                  du -sh "$RUNNER_TEMP/build-cache/"* .epr-local/downloads/* >> "$GITHUB_STEP_SUMMARY"
+                  du -sh "$RUNNER_TEMP/build-cache/"* .epr-local/downloads/composer/files .epr-local/downloads/npm/_cacache >> "$GITHUB_STEP_SUMMARY"
 
             # Explicit saves only: no combined cache action or automatic post-job save.
             - name: Conserver les couches Sail
@@ -903,11 +967,3 @@ jobs:
                       .epr-local/downloads/composer/files
                       .epr-local/downloads/npm/_cacache
                   key: ${{ steps.cache-downloads.outputs.cache-primary-key }}
-
-            - name: Conserver Chromium pour la version verrouillée de Playwright
-              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.cache-chromium.outputs.cache-hit != 'true' }}
-              continue-on-error: true
-              uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-              with:
-                  path: .epr-local/downloads/chromium
-                  key: ${{ steps.cache-chromium.outputs.cache-primary-key }}

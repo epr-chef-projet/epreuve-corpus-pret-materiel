@@ -25,7 +25,7 @@ on:
                 type: string
                 required: true
             image_id:
-                description: 'Image ID Docker sha256 reçu et approuvé par C'
+                description: 'ID Docker natif de la preuve reçue et approuvée par C'
                 type: string
                 required: true
             registry_digest:
@@ -47,6 +47,8 @@ jobs:
         timeout-minutes: 20
         outputs:
             image: ${{ steps.identity.outputs.image }}
+            config: ${{ steps.identity.outputs.config }}
+            reference: ${{ steps.identity.outputs.reference }}
             tag: ${{ steps.identity.outputs.tag }}
             artifact: ${{ steps.identity.outputs.artifact }}
         env:
@@ -136,24 +138,85 @@ jobs:
                   labels = image['Config']['Labels']
                   assert labels['org.opencontainers.image.revision'] == os.environ['SOURCE_SHA']
                   assert labels['org.epr.build-run'] == os.environ['BUILD_RUN'] and labels['org.epr.build-attempt'] == os.environ['BUILD_ATTEMPT']
+                  def archive_identity(archive, image):
+                      import gzip, hashlib, re, tarfile
+                      defaults = {'Hostname': '', 'Domainname': '', 'Image': '', 'AttachStdin': False, 'AttachStdout': False, 'AttachStderr': False, 'Tty': False, 'OpenStdin': False, 'StdinOnce': False, 'Volumes': None, 'OnBuild': None}
+                      with tarfile.open(archive, 'r:gz') as tar:
+                          members = tar.getmembers()
+                          assert len({m.name for m in members}) == len(members), 'Duplicate archive member'
+                          def read(name):
+                              assert tar.getmember(name).isfile(), 'Archive member must be a regular file'
+                              return tar.extractfile(name)
+                          manifest = json.load(read('manifest.json'))
+                          assert len(manifest) == 1, 'Expected one image in the archive'
+                          entry = manifest[0]
+                          assert len(entry['RepoTags']) == 1
+                          config_bytes = read(entry['Config']).read()
+                          config_digest = 'sha256:' + hashlib.sha256(config_bytes).hexdigest()
+                          assert entry['Config'] in ['blobs/sha256/' + config_digest[7:], config_digest[7:] + '.json']
+                          config = json.loads(config_bytes)
+                          assert config['os'] == image['Os'] == 'linux' and config['architecture'] == image['Architecture'] == 'amd64'
+                          assert defaults | config['config'] == defaults | image['Config'], 'Archive configuration differs'
+                          assert config['rootfs']['type'] == image['RootFS']['Type'] == 'layers'
+                          assert config['rootfs']['diff_ids'] == image['RootFS']['Layers'], 'Archive layers differ'
+                          assert len(entry['Layers']) == len(config['rootfs']['diff_ids'])
+                          descriptors = []
+                          for name, diff_id in zip(entry['Layers'], config['rootfs']['diff_ids']):
+                              with read(name) as stream:
+                                  digest = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
+                              assert name == 'blobs/sha256/' + digest[7:]
+                              with read(name) as stream:
+                                  compressed = stream.read(2) == b'\x1f\x8b'
+                              with read(name) as stream:
+                                  content = gzip.GzipFile(fileobj=stream) if compressed else stream
+                                  assert 'sha256:' + hashlib.file_digest(content, 'sha256').hexdigest() == diff_id, 'Layer content differs'
+                              descriptors.append({'digest': digest, 'size': tar.getmember(name).size})
+                          docker_ids = [config_digest]
+                          if 'index.json' in {m.name for m in members}:
+                              index = json.load(read('index.json'))
+                              assert len(index['manifests']) == 1
+                              descriptor = index['manifests'][0]
+                              assert re.fullmatch(r'sha256:[a-f0-9]{64}', descriptor['digest'])
+                              data = read('blobs/sha256/' + descriptor['digest'][7:]).read()
+                              assert 'sha256:' + hashlib.sha256(data).hexdigest() == descriptor['digest'] and len(data) == descriptor['size']
+                              native = json.loads(data)
+                              assert native['config']['digest'] == config_digest and native['config']['size'] == len(config_bytes)
+                              assert [{'digest': d['digest'], 'size': d['size']} for d in native['layers']] == descriptors
+                              docker_ids.append(descriptor['digest'])
+                          assert image['Id'] in docker_ids, 'Docker ID is not bound to this archive'
+                          return {'dockerId': image['Id'], 'configDigest': config_digest, 'archiveDockerIds': docker_ids, 'reference': entry['RepoTags'][0], 'rootfs': image['RootFS']}
+                  identity = archive_identity(archive, image)
+                  assert identity['reference'] == 'epr-production:gh-' + prefix
+                  if (p / 'image-proof/image-identity.json').exists():
+                      assert json.loads((p / 'image-proof/image-identity.json').read_text()) == identity
+                      assert receipt['configDigest'] == identity['configDigest']
+                  (p / 'identity.json').write_text(json.dumps(identity) + '\n')
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                      output.write('config=' + identity['configDigest'] + '\nreference=' + identity['reference'] + '\n')
                   PY
                   tag="ghcr.io/$GITHUB_REPOSITORY:sha-$SOURCE_SHA-run-$BUILD_RUN-a$BUILD_ATTEMPT"
                   printf 'image=%s\ntag=%s\nartifact=production-image-%s-%s\n' "$IMAGE_ID" "$tag" "$BUILD_RUN" "$BUILD_ATTEMPT" >> "$GITHUB_OUTPUT"
 
             - name: Charger sans reconstruction et rapprocher configuration et couches
               shell: bash
+              env:
+                  ARCHIVE_IMAGE_REF: ${{ steps.identity.outputs.reference }}
               run: |
                   set -euo pipefail
                   docker load --input "$RUNNER_TEMP/production-image/image.tar.gz"
-                  docker image inspect "$IMAGE_ID" > "$RUNNER_TEMP/loaded.json"
+                  docker image inspect "$ARCHIVE_IMAGE_REF" > "$RUNNER_TEMP/loaded.json"
                   python3 - <<'PY'
                   import json, os
                   from pathlib import Path
                   p = Path(os.environ['RUNNER_TEMP'])
                   before = json.loads((p / 'image-proof' / 'image-inspect.json').read_text())[0]
                   after = json.loads((p / 'loaded.json').read_text())[0]
-                  assert before['Id'] == after['Id'] == os.environ['IMAGE_ID']
+                  identity = json.loads((p / 'identity.json').read_text())
+                  assert before['Id'] == identity['dockerId'] == os.environ['IMAGE_ID']
+                  assert after['Id'] in identity['archiveDockerIds']
                   assert before['Config'] == after['Config'] and before['RootFS'] == after['RootFS']
+                  with open(os.environ['GITHUB_ENV'], 'a') as output:
+                      output.write('LOADED_IMAGE_ID=' + after['Id'] + '\n')
                   PY
 
             - name: Actualiser les publications officielles et le scan de la même image
@@ -182,14 +245,14 @@ jobs:
                   trivy=(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/trivy-cache:/root/.cache/trivy" -v "$RUNNER_TEMP:/proof" "$scanner")
                   "${trivy[@]}" --version > "$RUNNER_TEMP/image-proof/trivy-publication-version.txt"
                   "${trivy[@]}" image --download-db-only
-                  "${trivy[@]}" image --scanners vuln --format json --output /proof/image-proof/publication-vulnerabilities.json "$IMAGE_ID"
+                  "${trivy[@]}" image --scanners vuln --format json --output /proof/image-proof/publication-vulnerabilities.json "$LOADED_IMAGE_ID"
                   python3 - <<'PYCOVERAGE'
                   import json, os
                   from pathlib import Path
                   root = Path(os.environ['RUNNER_TEMP'])
                   report = json.loads((root / 'image-proof' / 'publication-vulnerabilities.json').read_text())
                   inventory = json.loads((root / 'image-proof' / 'php-inventory.json').read_text())
-                  assert report['Metadata']['ImageID'] == os.environ['IMAGE_ID'] and report['Metadata']['OS']['Family'] == 'wolfi'
+                  assert report['Metadata']['ImageID'] == os.environ['LOADED_IMAGE_ID'] and report['Metadata']['OS']['Family'] == 'wolfi'
                   os_targets = [r for r in report['Results'] if r.get('Class') == 'os-pkgs' and r['Type'] == 'wolfi']
                   composer = [r for r in report['Results'] if r.get('Class') == 'lang-pkgs' and r['Type'] == 'composer-vendor']
                   assert len(os_targets) == len(composer) == 1 and composer[0]['Packages']
@@ -197,9 +260,9 @@ jobs:
                   assert not any(r.get('IgnoredVulnerabilities') for r in report['Results'])
                   PYCOVERAGE
                   set +e
-                  "${trivy[@]}" image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$IMAGE_ID"
+                  "${trivy[@]}" image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$LOADED_IMAGE_ID"
                   vulnerabilities=$?
-                  "${trivy[@]}" image --scanners secret --format json --output /proof/secrets-private.json --exit-code 1 "$IMAGE_ID"
+                  "${trivy[@]}" image --scanners secret --format json --output /proof/secrets-private.json --exit-code 1 "$LOADED_IMAGE_ID"
                   secrets=$?
                   set -e
                   cp "$RUNNER_TEMP/trivy-cache/db/metadata.json" "$RUNNER_TEMP/image-proof/trivy-publication-db.json"
@@ -228,6 +291,8 @@ jobs:
         env:
             GH_TOKEN: ${{ github.token }}
             IMAGE_ID: ${{ needs.prepare.outputs.image }}
+            IMAGE_CONFIG_DIGEST: ${{ needs.prepare.outputs.config }}
+            ARCHIVE_IMAGE_REF: ${{ needs.prepare.outputs.reference }}
             IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
             ARTIFACT: ${{ needs.prepare.outputs.artifact }}
             BUILD_RUN: ${{ inputs.build_run }}
@@ -240,7 +305,64 @@ jobs:
                   gh run download "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT" --dir "$RUNNER_TEMP/image"
                   printf '%s  %s\n' "$ARCHIVE_SHA" "$RUNNER_TEMP/image/image.tar.gz" | sha256sum --check --strict -
                   docker load --input "$RUNNER_TEMP/image/image.tar.gz"
-                  test "$(docker image inspect --format '{{.Id}}' "$IMAGE_ID")" = "$IMAGE_ID"
+                  docker image inspect "$ARCHIVE_IMAGE_REF" > "$RUNNER_TEMP/reloaded.json"
+                  python3 - <<'PYRELOAD'
+                  import json, os
+                  from pathlib import Path
+                  def archive_identity(archive, image):
+                      import gzip, hashlib, re, tarfile
+                      defaults = {'Hostname': '', 'Domainname': '', 'Image': '', 'AttachStdin': False, 'AttachStdout': False, 'AttachStderr': False, 'Tty': False, 'OpenStdin': False, 'StdinOnce': False, 'Volumes': None, 'OnBuild': None}
+                      with tarfile.open(archive, 'r:gz') as tar:
+                          members = tar.getmembers()
+                          assert len({m.name for m in members}) == len(members), 'Duplicate archive member'
+                          def read(name):
+                              assert tar.getmember(name).isfile(), 'Archive member must be a regular file'
+                              return tar.extractfile(name)
+                          manifest = json.load(read('manifest.json'))
+                          assert len(manifest) == 1, 'Expected one image in the archive'
+                          entry = manifest[0]
+                          assert len(entry['RepoTags']) == 1
+                          config_bytes = read(entry['Config']).read()
+                          config_digest = 'sha256:' + hashlib.sha256(config_bytes).hexdigest()
+                          assert entry['Config'] in ['blobs/sha256/' + config_digest[7:], config_digest[7:] + '.json']
+                          config = json.loads(config_bytes)
+                          assert config['os'] == image['Os'] == 'linux' and config['architecture'] == image['Architecture'] == 'amd64'
+                          assert defaults | config['config'] == defaults | image['Config'], 'Archive configuration differs'
+                          assert config['rootfs']['type'] == image['RootFS']['Type'] == 'layers'
+                          assert config['rootfs']['diff_ids'] == image['RootFS']['Layers'], 'Archive layers differ'
+                          assert len(entry['Layers']) == len(config['rootfs']['diff_ids'])
+                          descriptors = []
+                          for name, diff_id in zip(entry['Layers'], config['rootfs']['diff_ids']):
+                              with read(name) as stream:
+                                  digest = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
+                              assert name == 'blobs/sha256/' + digest[7:]
+                              with read(name) as stream:
+                                  compressed = stream.read(2) == b'\x1f\x8b'
+                              with read(name) as stream:
+                                  content = gzip.GzipFile(fileobj=stream) if compressed else stream
+                                  assert 'sha256:' + hashlib.file_digest(content, 'sha256').hexdigest() == diff_id, 'Layer content differs'
+                              descriptors.append({'digest': digest, 'size': tar.getmember(name).size})
+                          docker_ids = [config_digest]
+                          if 'index.json' in {m.name for m in members}:
+                              index = json.load(read('index.json'))
+                              assert len(index['manifests']) == 1
+                              descriptor = index['manifests'][0]
+                              assert re.fullmatch(r'sha256:[a-f0-9]{64}', descriptor['digest'])
+                              data = read('blobs/sha256/' + descriptor['digest'][7:]).read()
+                              assert 'sha256:' + hashlib.sha256(data).hexdigest() == descriptor['digest'] and len(data) == descriptor['size']
+                              native = json.loads(data)
+                              assert native['config']['digest'] == config_digest and native['config']['size'] == len(config_bytes)
+                              assert [{'digest': d['digest'], 'size': d['size']} for d in native['layers']] == descriptors
+                              docker_ids.append(descriptor['digest'])
+                          assert image['Id'] in docker_ids, 'Docker ID is not bound to this archive'
+                          return {'dockerId': image['Id'], 'configDigest': config_digest, 'archiveDockerIds': docker_ids, 'reference': entry['RepoTags'][0], 'rootfs': image['RootFS']}
+                  root = Path(os.environ['RUNNER_TEMP'])
+                  image = json.loads((root / 'reloaded.json').read_text())[0]
+                  identity = archive_identity(root / 'image/image.tar.gz', image)
+                  assert identity['reference'] == os.environ['ARCHIVE_IMAGE_REF']
+                  assert identity['configDigest'] == os.environ['IMAGE_CONFIG_DIGEST']
+                  assert os.environ['IMAGE_ID'] in identity['archiveDockerIds']
+                  PYRELOAD
 
             - name: Publier le tag sélectionné sans remplacer un contenu différent
               shell: bash
@@ -261,11 +383,11 @@ jobs:
                   req = urllib.request.Request('https://ghcr.io/v2/' + repo + '/manifests/' + tag, headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json'})
                   try:
                       manifest = json.load(urllib.request.urlopen(req, timeout=30))
-                      assert manifest['config']['digest'] == os.environ['IMAGE_ID'], 'Existing tag has different content'
+                      assert manifest['config']['digest'] == os.environ['IMAGE_CONFIG_DIGEST'], 'Existing tag has different content'
                   except urllib.error.HTTPError as error:
                       if error.code != 404: raise
                   PY
-                  docker tag "$IMAGE_ID" "$IMAGE_TAG"
+                  docker tag "$ARCHIVE_IMAGE_REF" "$IMAGE_TAG"
                   docker push "$IMAGE_TAG"
                   docker buildx imagetools inspect "$IMAGE_TAG" >> "$GITHUB_STEP_SUMMARY"
                   docker logout ghcr.io
@@ -279,6 +401,7 @@ jobs:
             source_sha: ${{ inputs.source_sha }}
             image_ref: ghcr.io/epr-chef-projet/epreuve-corpus-pret-materiel@${{ inputs.registry_digest }}
             image_id: ${{ inputs.image_id }}
+            image_config_digest: ${{ needs.prepare.outputs.config }}
             store_archive: false
 
     received-public:

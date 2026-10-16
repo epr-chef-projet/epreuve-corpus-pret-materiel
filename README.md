@@ -2,7 +2,7 @@
 
 Application pour deux ateliers indépendants : catalogue de matériel, demandes multiarticles, réservation des quantités, prêts et bordereaux PDF privés. Le [cahier des charges fonctionnel](project-management/docs/cahiers-des-charges/fonctionnel/README.md) définit les comportements attendus.
 
-La base Laravel, Vue/TypeScript et Inertia utilise Docker/Sail avec PostgreSQL, Redis, Horizon et Reverb. Les comptes précréés se connectent par identifiant, avec leur atelier, leur rôle et une session limitée à deux heures. Le tableau de bord indique les fonctions encore indisponibles : cadre complet FR/EN, catalogue et prêts. Mailtrap est retenu pour le SMTP de développement, à renseigner dans les paramètres privés ; Mailpit reste disponible pour la qualification isolée.
+La base Laravel, Vue/TypeScript et Inertia utilise Docker/Sail avec PostgreSQL, Redis, Horizon, Reverb et Mailpit. Les comptes précréés se connectent par identifiant, avec leur atelier, leur rôle et une session limitée à deux heures. Le tableau de bord indique les fonctions encore indisponibles : cadre complet FR/EN, catalogue et prêts.
 
 ## Installer
 

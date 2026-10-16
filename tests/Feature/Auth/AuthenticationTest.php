@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Auth;
 
-use App\Modules\IdentityAccess\Accounts\UseCases\Authenticate\IdentityRepository;
-use App\Modules\IdentityAccess\Sessions\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Identity\UseCases\Authenticate\IdentityRepository;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;

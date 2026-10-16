@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Modules\IdentityAccess;
 
+use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
 use App\Modules\IdentityAccess\PublicApi\AdmitSessionPublication;
 use App\Modules\IdentityAccess\PublicApi\ResolveActor;
 use App\Modules\IdentityAccess\PublicApi\ServiceContext;
-use App\Modules\IdentityAccess\Sessions\UseCases\ManageSession\SessionRepository;
 use App\Shared\Database\SqlUnit;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Auth;

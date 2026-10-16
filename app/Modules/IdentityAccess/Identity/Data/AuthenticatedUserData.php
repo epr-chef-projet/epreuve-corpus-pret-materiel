@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Accounts\Data;
+namespace App\Modules\IdentityAccess\Identity\Data;
 
 use App\Modules\IdentityAccess\PublicApi\Role;
 use Spatie\LaravelData\Data;

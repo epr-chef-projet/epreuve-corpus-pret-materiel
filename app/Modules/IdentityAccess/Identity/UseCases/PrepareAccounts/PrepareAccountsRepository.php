@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Accounts\UseCases\PrepareAccounts;
+namespace App\Modules\IdentityAccess\Identity\UseCases\PrepareAccounts;
 
 use Illuminate\Support\Facades\DB;
 use RuntimeException;

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Modules\IdentityAccess\Providers;
 
-use App\Modules\IdentityAccess\Accounts\Auth\IdentityUserProvider;
-use App\Modules\IdentityAccess\Accounts\Models\User;
-use App\Modules\IdentityAccess\Accounts\UseCases\PrepareAccounts\PrepareIdentityAccounts;
+use App\Modules\IdentityAccess\Identity\Auth\IdentityUserProvider;
+use App\Modules\IdentityAccess\Identity\Models\User;
+use App\Modules\IdentityAccess\Identity\UseCases\PrepareAccounts\PrepareIdentityAccounts;
 use App\Modules\IdentityAccess\PublicApi\Role;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;

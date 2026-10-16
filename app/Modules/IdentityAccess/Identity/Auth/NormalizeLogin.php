@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Accounts\Auth;
+namespace App\Modules\IdentityAccess\Identity\Auth;
 
 use Closure;
 use Illuminate\Http\Request;

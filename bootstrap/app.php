@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
-use App\Modules\IdentityAccess\Sessions\Http\ResolveSession;
-use App\Modules\IdentityAccess\Sessions\Http\ShareIdentity;
+use App\Modules\IdentityAccess\Access\Http\ResolveSession;
+use App\Modules\IdentityAccess\Access\Http\ShareIdentity;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Modules\IdentityAccess;
 
-use App\Modules\IdentityAccess\Accounts\Data\AuthenticatedUserData;
+use App\Modules\IdentityAccess\Identity\Data\AuthenticatedUserData;
 use App\Modules\IdentityAccess\PublicApi\Role;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;

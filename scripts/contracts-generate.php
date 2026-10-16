@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Modules\IdentityAccess\Accounts\Data\AuthenticatedUserData;
+use App\Modules\IdentityAccess\Identity\Data\AuthenticatedUserData;
 use App\Modules\IdentityAccess\PublicApi\Role;
 use Illuminate\Contracts\Console\Kernel;
 use Spatie\LaravelTypeScriptTransformer\LaravelData\LaravelDataTypeScriptTransformerExtension;

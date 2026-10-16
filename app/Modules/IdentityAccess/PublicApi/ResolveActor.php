@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Modules\IdentityAccess\PublicApi;
 
-use App\Modules\IdentityAccess\Accounts\UseCases\Authenticate\IdentityRepository;
-use App\Modules\IdentityAccess\Sessions\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Identity\UseCases\Authenticate\IdentityRepository;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;

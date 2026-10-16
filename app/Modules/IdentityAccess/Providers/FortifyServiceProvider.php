@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Modules\IdentityAccess\Providers;
 
-use App\Modules\IdentityAccess\Accounts\Auth\NormalizeLogin;
-use App\Modules\IdentityAccess\Sessions\UseCases\StartSession\StartSessionAction;
+use App\Modules\IdentityAccess\Access\UseCases\StartSession\StartSessionAction;
+use App\Modules\IdentityAccess\Identity\Auth\NormalizeLogin;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;

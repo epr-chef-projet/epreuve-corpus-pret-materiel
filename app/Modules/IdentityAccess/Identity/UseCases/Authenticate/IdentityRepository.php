@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Accounts\UseCases\Authenticate;
+namespace App\Modules\IdentityAccess\Identity\UseCases\Authenticate;
 
-use App\Modules\IdentityAccess\Accounts\Models\User;
+use App\Modules\IdentityAccess\Identity\Models\User;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use Illuminate\Support\Facades\DB;
 

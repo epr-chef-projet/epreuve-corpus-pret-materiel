@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Sessions\UseCases\StartSession;
+namespace App\Modules\IdentityAccess\Access\UseCases\StartSession;
 
-use App\Modules\IdentityAccess\Accounts\Models\User;
-use App\Modules\IdentityAccess\Sessions\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Identity\Models\User;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;

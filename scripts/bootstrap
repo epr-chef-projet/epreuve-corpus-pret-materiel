@@ -65,10 +65,6 @@ if [[ ! -e .env ]]; then
     set_value FORWARD_MAILPIT_DASHBOARD_PORT "$((8024+number+10#$offset))"
     set_value REVERB_PUBLIC_PORT "$((8090+number+10#$offset))"
     set_value APP_URL "http://$task_project.localhost:$(value APP_PORT)"
-    if [[ -n "$run_name" ]]; then
-        set_value MAIL_HOST mailpit
-        set_value MAIL_PORT 1025
-    fi
     set_value DB_PASSWORD "$(head -c 64 "$(value POSTGRES_APP_PASSWORD_FILE)")"
     set_value AUTH_LOOKUP_PASSWORD "$(head -c 64 "$(value POSTGRES_AUTH_LOOKUP_PASSWORD_FILE)")"
     set_value SESSION_COOKIE "${task_project//-/_}_session"

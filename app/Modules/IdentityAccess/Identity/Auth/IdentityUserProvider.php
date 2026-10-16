@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Accounts\Auth;
+namespace App\Modules\IdentityAccess\Identity\Auth;
 
-use App\Modules\IdentityAccess\Accounts\Models\User;
-use App\Modules\IdentityAccess\Accounts\UseCases\Authenticate\IdentityRepository;
-use App\Modules\IdentityAccess\Sessions\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Identity\Models\User;
+use App\Modules\IdentityAccess\Identity\UseCases\Authenticate\IdentityRepository;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Http\Request;

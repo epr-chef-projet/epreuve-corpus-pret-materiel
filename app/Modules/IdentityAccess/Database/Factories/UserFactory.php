@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\IdentityAccess\Database\Factories;
 
-use App\Modules\IdentityAccess\Accounts\Models\User;
+use App\Modules\IdentityAccess\Identity\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;

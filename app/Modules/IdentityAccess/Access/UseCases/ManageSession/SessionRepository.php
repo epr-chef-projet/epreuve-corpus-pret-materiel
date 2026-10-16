@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Sessions\UseCases\ManageSession;
+namespace App\Modules\IdentityAccess\Access\UseCases\ManageSession;
 
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\IdentityAccess\PublicApi;
 
-use App\Modules\IdentityAccess\Sessions\UseCases\ManageSession\SessionRepository;
+use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
 use App\Shared\Database\SqlUnit;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Encryption\DecryptException;

@@ -143,9 +143,7 @@ Une répétition sur une cible peuplée ou un reçu déjà présent est refusée
 
 ### SMTP de développement
 
-Une installation neuve de développement laisse le serveur SMTP vide jusqu’à sa configuration privée ; les runs isolés de qualification utilisent Mailpit. Une copie existante conserve ses paramètres SMTP : les remplacer explicitement si elle pointait encore sur Mailpit.
-
-Renseigner les paramètres SMTP fournis par Mailtrap dans le `.env` privé (`MAIL_MAILER=smtp`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` et paramètres de transport du fournisseur). Ne pas versionner ni transmettre ces identifiants. Aucune connexion/reset/inscription ne déclenche d'email dans le noyau. La CI et les essais conservent leurs transports isolés ; aucun email externe n'est nécessaire à leur exécution. Après modification de configuration, renouveler les processus PHP concernés, sans régénérer `APP_KEY`.
+Le SMTP de développement utilise Mailpit : `MAIL_MAILER=smtp`, `MAIL_HOST=mailpit`, `MAIL_PORT=1025`, sans identifiant externe. Les messages restent capturés localement. Aucun parcours métier du noyau ne déclenche d'email ; les essais gardent leurs transports isolés.
 
 ## 4. Travailler au quotidien
 

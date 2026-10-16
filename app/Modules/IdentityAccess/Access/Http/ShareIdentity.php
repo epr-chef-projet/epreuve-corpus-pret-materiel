@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Sessions\Http;
+namespace App\Modules\IdentityAccess\Access\Http;
 
-use App\Modules\IdentityAccess\Accounts\Data\AuthenticatedUserData;
-use App\Modules\IdentityAccess\Accounts\Models\User;
+use App\Modules\IdentityAccess\Identity\Data\AuthenticatedUserData;
+use App\Modules\IdentityAccess\Identity\Models\User;
 use App\Modules\IdentityAccess\PublicApi\Role;
 use Closure;
 use Illuminate\Http\Request;

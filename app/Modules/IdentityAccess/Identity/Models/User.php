@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\IdentityAccess\Accounts\Models;
+namespace App\Modules\IdentityAccess\Identity\Models;
 
 use App\Modules\IdentityAccess\Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;

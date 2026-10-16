@@ -13,6 +13,9 @@ use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
 {
+    /** @var list<string> */
+    protected $connectionsToTransact = ['pgsql', 'auth_lookup'];
+
     public function createApplication(): Application
     {
         if (getenv('APP_CONFIG_CACHE') || is_file(dirname(__DIR__).'/bootstrap/cache/config.php')) {

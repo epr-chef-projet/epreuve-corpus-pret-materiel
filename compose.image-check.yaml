@@ -67,6 +67,7 @@ services:
         stop_signal: SIGQUIT
         environment:
             <<: *application
+            AUTH_LOOKUP_PASSWORD: '${IMAGE_AUTH_LOOKUP_PASSWORD:?Authentication SQL credential required}'
             SESSION_DRIVER: redis
             SESSION_CONNECTION: sessions
             SESSION_COOKIE: '${IMAGE_INSTANCE}_image_session'

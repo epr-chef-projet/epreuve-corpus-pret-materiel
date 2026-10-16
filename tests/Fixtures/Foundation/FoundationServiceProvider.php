@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Fixtures\Foundation;
 
-use App\Models\User;
+use App\Modules\IdentityAccess\Accounts\Models\User;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Vite;
 use Illuminate\Http\JsonResponse;

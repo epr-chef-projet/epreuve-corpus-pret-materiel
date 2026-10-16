@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Foundation;
 
-use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;
 
 final class DatabaseIdentityTest extends TestCase
@@ -33,7 +33,7 @@ final class DatabaseIdentityTest extends TestCase
         foreach (['/horizon', '/horizon/api/stats'] as $path) {
             $this->get($path)->assertForbidden();
         }
-        $this->actingAs(User::factory()->create());
+        Accounts::signIn($this);
         foreach (['/horizon', '/horizon/api/stats'] as $path) {
             $this->get($path)->assertForbidden();
         }

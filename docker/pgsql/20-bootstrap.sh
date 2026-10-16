@@ -40,7 +40,7 @@
      set_role_password() {
          local role="$1" password_file="$2"
          case "$role" in
-             epr_app|epr_migrator|epr_backup) ;;
+             epr_app|epr_migrator|epr_backup|epr_auth_lookup) ;;
              *) fail "Unexpected database role" ;;
          esac
 
@@ -49,7 +49,7 @@
                  --command "\\password $role"
      }
 
-     for account in app migrator backup; do
+     for account in app migrator backup auth_lookup; do
          check_password_file "/run/secrets/postgres_${account}_password"
      done
 
@@ -60,7 +60,7 @@
      bootstrap_psql --dbname "$POSTGRES_DB" \
          --file /opt/epr-postgres-bootstrap/roles.sql
 
-     for account in app migrator backup; do
+     for account in app migrator backup auth_lookup; do
          set_role_password "epr_${account}" "/run/secrets/postgres_${account}_password"
      done
 

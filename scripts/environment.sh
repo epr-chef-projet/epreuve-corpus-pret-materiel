@@ -71,6 +71,7 @@ check_resources() {
     done
 }
 check_configuration() {
+    local permit_legacy_auth="${1:-false}"
     local selector expected role secret compose_version digest
     local -A credentials=() settings=()
     local line setting
@@ -118,7 +119,8 @@ check_configuration() {
     [[ -z "${COMPOSE_FILE:-}" && -z "${COMPOSE_PROFILES:-}" ]] || fail 'Inherited Compose selection refused.'
     [[ -z "${COMPOSE_PROJECT_NAME:-}" || "$COMPOSE_PROJECT_NAME" == "$task_project" ]] || fail 'Inherited project refused.'
     [[ "${APP_SERVICE:-laravel.test}" == laravel.test && "${APP_USER:-sail}" == sail ]] || fail 'Foreign Sail service or user.'
-    for role in BOOTSTRAP APP MIGRATOR BACKUP; do
+    for role in BOOTSTRAP APP MIGRATOR BACKUP AUTH_LOOKUP; do
+        [[ "$role" != AUTH_LOOKUP || "$permit_legacy_auth" != true ]] || continue
         secret="$(value "POSTGRES_${role}_PASSWORD_FILE")"
         [[ "$secret" == /* && "$(realpath -e -- "$secret")" == "$secret" && "$secret" != "$task_root/"* && -f "$secret" && ! -L "$secret" ]] || fail 'Secrets must be real files outside the clone.'
         [[ "$(stat -c %u "$(dirname -- "$secret")")" == "$(id -u)" && "$(stat -c %a "$(dirname -- "$secret")")" == 700 ]] || fail 'Private secret directory required.'
@@ -128,6 +130,9 @@ check_configuration() {
         credentials[$digest]=1
         [[ "$(wc -c < "$secret")" -eq 65 && "$(head -c 64 "$secret")" =~ ^[0-9a-f]{64}$ ]] || fail 'Invalid database credential.'
     done
+    if [[ "$permit_legacy_auth" != true ]]; then
+        [[ "$(value AUTH_LOOKUP_PASSWORD)" == "$(head -c 64 "$(value POSTGRES_AUTH_LOOKUP_PASSWORD_FILE)")" ]] || fail 'Inconsistent authentication credential.'
+    fi
     [[ "$(value DB_PASSWORD)" == "$(head -c 64 "$(value POSTGRES_APP_PASSWORD_FILE)")" ]] || fail 'Inconsistent application credential.'
     check_resources
 }

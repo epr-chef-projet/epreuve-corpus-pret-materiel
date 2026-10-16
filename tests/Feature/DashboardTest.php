@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
-use App\Models\User;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
@@ -20,8 +20,7 @@ class DashboardTest extends TestCase
 
     public function test_authenticated_users_can_visit_the_dashboard(): void
     {
-        $user = User::factory()->create();
-        $this->actingAs($user);
+        Accounts::signIn($this);
 
         $response = $this->get(route('dashboard'));
         $response->assertOk();

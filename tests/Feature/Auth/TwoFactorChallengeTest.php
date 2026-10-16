@@ -4,48 +4,32 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Auth;
 
-use App\Models\User;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
-use Inertia\Testing\AssertableInertia as Assert;
-use Laravel\Fortify\Features;
+use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;
 
 class TwoFactorChallengeTest extends TestCase
 {
     use DatabaseTransactions;
 
-    protected function setUp(): void
+    public function test_get_two_factor_challenge_is_not_exposed(): void
     {
-        parent::setUp();
-
-        $this->skipUnlessFortifyHas(Features::twoFactorAuthentication());
+        $this->get('/two-factor-challenge')->assertNotFound();
+        Accounts::signIn($this);
+        $this->get('/two-factor-challenge')->assertNotFound();
     }
 
-    public function test_two_factor_challenge_redirects_to_login_when_not_authenticated(): void
+    public function test_post_two_factor_challenge_is_not_exposed(): void
     {
-        $response = $this->get(route('two-factor.login'));
-
-        $response->assertRedirect(route('login'));
+        $this->post('/two-factor-challenge')->assertNotFound();
+        Accounts::signIn($this);
+        $this->post('/two-factor-challenge')->assertNotFound();
     }
 
-    public function test_two_factor_challenge_can_be_rendered(): void
+    public function test_post_user_two_factor_authentication_is_not_exposed(): void
     {
-        Features::twoFactorAuthentication([
-            'confirm' => true,
-            'confirmPassword' => true,
-        ]);
-
-        $user = User::factory()->withTwoFactor()->create();
-
-        $this->post(route('login'), [
-            'email' => $user->email,
-            'password' => 'password',
-        ]);
-
-        $this->get(route('two-factor.login'))
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page
-                ->component('auth/TwoFactorChallenge'),
-            );
+        $this->post('/user/two-factor-authentication')->assertNotFound();
+        Accounts::signIn($this);
+        $this->post('/user/two-factor-authentication')->assertNotFound();
     }
 }

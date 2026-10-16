@@ -41,9 +41,6 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'name' => config('app.name'),
             'reverb' => config('realtime.key') ? config('realtime') : null,
-            'auth' => [
-                'user' => $request->user(),
-            ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
     }

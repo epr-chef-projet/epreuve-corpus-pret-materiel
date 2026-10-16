@@ -2,7 +2,7 @@
 
 **Version 1.0.** Ce document possède les versions, paramètres et raccordements locaux. L'[installation](installation.md) possède l'amorçage et le cycle de développement ; les [contrôles](qualite-et-recette.md) et le [contrat de livraison](../exploitation/collaboration-livraison.md) possèdent leurs recettes respectives. Les [contrats de données](../../cahiers-des-charges/technique/donnees-securite.md) possèdent les privilèges et le contexte RLS.
 
-Les services de développement sont HTTP, Vite/HMR, PostgreSQL, Redis, Mailpit, Horizon, Reverb et ordonnanceur. Le build fournit les assets de livraison et reste un contrôle de qualité. Les capacités métier, leurs tests et les mécanismes supplémentaires sont vérifiés dans les fonctionnalités qui les introduisent ; une réception d'installation ne les qualifie pas.
+Les services Docker sont HTTP, Vite/HMR, PostgreSQL, Redis, Mailpit, Horizon, Reverb et ordonnanceur. Le SMTP de développement utilise Mailtrap, configuré dans le `.env` privé ; Mailpit sert à la qualification isolée sans identifiants externes. La présence du conteneur Mailpit ne choisit pas le serveur SMTP utilisé par Laravel. Le build fournit les assets de livraison et reste un contrôle de qualité. Les capacités métier, leurs tests et les mécanismes supplémentaires sont vérifiés dans les fonctionnalités qui les introduisent ; une réception d'installation ne les qualifie pas.
 
 <a id="versions"></a>
 

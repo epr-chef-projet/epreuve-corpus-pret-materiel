@@ -4,32 +4,32 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Auth;
 
-use App\Models\User;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
-use Inertia\Testing\AssertableInertia as Assert;
+use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;
 
 class PasswordConfirmationTest extends TestCase
 {
     use DatabaseTransactions;
 
-    public function test_confirm_password_screen_can_be_rendered(): void
+    public function test_get_user_confirm_password_is_not_exposed(): void
     {
-        $user = User::factory()->create();
-
-        $response = $this->actingAs($user)->get(route('password.confirm'));
-
-        $response->assertOk();
-
-        $response->assertInertia(fn (Assert $page) => $page
-            ->component('auth/ConfirmPassword'),
-        );
+        $this->get('/user/confirm-password')->assertNotFound();
+        Accounts::signIn($this);
+        $this->get('/user/confirm-password')->assertNotFound();
     }
 
-    public function test_password_confirmation_requires_authentication(): void
+    public function test_post_user_confirm_password_is_not_exposed(): void
     {
-        $response = $this->get(route('password.confirm'));
+        $this->post('/user/confirm-password')->assertNotFound();
+        Accounts::signIn($this);
+        $this->post('/user/confirm-password')->assertNotFound();
+    }
 
-        $response->assertRedirect(route('login'));
+    public function test_get_user_confirmed_password_status_is_not_exposed(): void
+    {
+        $this->get('/user/confirmed-password-status')->assertNotFound();
+        Accounts::signIn($this);
+        $this->get('/user/confirmed-password-status')->assertNotFound();
     }
 }

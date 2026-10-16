@@ -208,6 +208,7 @@ services:
             - postgres_migrator_password
             - postgres_app_password
             - postgres_backup_password
+            - postgres_auth_lookup_password
         networks:
             - sail
         healthcheck:
@@ -267,3 +268,5 @@ secrets:
         file: '${POSTGRES_APP_PASSWORD_FILE:?Missing POSTGRES_APP_PASSWORD_FILE in .env}'
     postgres_backup_password:
         file: '${POSTGRES_BACKUP_PASSWORD_FILE:?Missing POSTGRES_BACKUP_PASSWORD_FILE in .env}'
+    postgres_auth_lookup_password:
+        file: '${POSTGRES_AUTH_LOOKUP_PASSWORD_FILE:?Missing POSTGRES_AUTH_LOOKUP_PASSWORD_FILE in .env}'

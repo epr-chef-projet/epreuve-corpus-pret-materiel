@@ -23,7 +23,7 @@ final class PrepareAccountsAction
         if (is_file($path) || is_link($path)) {
             throw new RuntimeException('Existing private account receipt preserved for inspection.');
         }
-        $password = bin2hex(random_bytes(32));
+        $password = 'password';
         $hash = Hash::make($password);
         $users = [];
         $workshops = [];

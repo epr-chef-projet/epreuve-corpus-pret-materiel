@@ -20,7 +20,7 @@ return [
     |
     */
 
-    'driver' => env('SESSION_DRIVER', 'database'),
+    'driver' => env('SESSION_DRIVER', 'redis'),
 
     /*
     |--------------------------------------------------------------------------
@@ -82,13 +82,12 @@ return [
     | Session Database Table
     |--------------------------------------------------------------------------
     |
-    | When using the "database" session driver, you may specify the table to
-    | be used to store sessions. Of course, a sensible default is defined
-    | for you; however, you're welcome to change this to another table.
+    | SQL sessions are not configured. Override Laravel's default table
+    | instead of advertising a table that this project does not create.
     |
     */
 
-    'table' => env('SESSION_TABLE', 'sessions'),
+    'table' => null,
 
     /*
     |--------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Installation et utilisation de la base
 
-**Version 0.9.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
+**Version 0.10.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
 
 Le projet comprend Laravel, Fortify, Inertia, Vue et les écrans d'authentification, avec les services retenus. Un clone reçoit les sources et leurs locks, sans nouvelle acquisition du kit. Les fonctionnalités et leurs contrats relèvent des [spécifications](../../cahiers-des-charges/fonctionnel/README.md) et des [contrats de modules](../architecture/contrats-et-lots.md).
 
@@ -113,7 +113,7 @@ Choisir explicitement `laravel` pour l’application ou `testing` pour les tests
 migration_database=testing
 ./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$migration_database" migrator tinker --execute '
 $identity = DB::selectOne("select session_user, current_user, current_database() as database, current_schema() as schema, host(inet_server_addr()) as address");
-if (app()->configurationIsCached() || app()->environment() !== "local" || $identity->session_user !== "epr_migrator" || $identity->current_user !== "epr_owner" || $identity->database !== getenv("DB_DATABASE") || $identity->schema !== "epr" || !in_array($identity->address, gethostbynamel("pgsql") ?: [], true)) { throw new RuntimeException("Migration target refused"); }
+if (!in_array(getenv("DB_DATABASE"), ["laravel", "testing"], true) || app()->configurationIsCached() || app()->environment() !== "local" || $identity->session_user !== "epr_migrator" || $identity->current_user !== "epr_owner" || $identity->database !== getenv("DB_DATABASE") || $identity->schema !== "epr" || !in_array($identity->address, gethostbynamel("pgsql") ?: [], true)) { throw new RuntimeException("Migration target refused"); }
 dump($identity);'
 ```
 
@@ -128,6 +128,73 @@ if (DB::select("select c.relname from pg_class c join pg_namespace n on n.oid=c.
 
 Attendus : migrations appliquées ou aucune migration en attente, objets possédés par `epr_owner`. Exécuter cette séquence pour chacune des deux bases à l’installation, puis seulement lorsque les migrations changent. Elle ne fait ni reset ni semis. Les tests emploient ensuite `epr_app`, sans droits DDL ; les tests transactionnels ne relancent pas les migrations.
 
+### Structure créée par les migrations
+
+IdentityAccess crée directement les trois tables `identity_access_workshops`, `identity_access_users` et `identity_access_auth_sessions`, chacune dans sa migration de `app/Modules/IdentityAccess/Database/Migrations/`. Une migration complémentaire installe leurs capacités PostgreSQL réservées. Les comptes portent directement UUID, login, atelier et rôle ; aucun compte du starter n'est conservé dans une table parallèle. Les droits applicatifs directs sur les trois tables sont révoqués dans leur transaction de création.
+
+`database/migrations/` conserve la création technique de `failed_jobs` : les tâches utilisent Redis mais leur fournisseur d'échecs écrit encore dans cette table. La table `migrations` est gérée par Laravel. Les tables SQL de sessions, cache, file et lots Laravel ne sont pas créées ; ces pilotes ne sont pas configurés par le projet. Les entrées applicatives inutilisées sont explicitement nulles quand le chargement Laravel fusionnerait sinon les configurations natives. Fortify reste limité à connexion/déconnexion ; les dépendances PHP qu'il requiert restent installées même lorsqu'une fonctionnalité optionnelle n'est pas exposée.
+
+Une installation neuve suit `migrate`, puis la préparation explicite des comptes ci-dessous. Une mise à jour ordinaire utilise également `migrate` et préserve les données. Après consolidation des migrations initiales selon R05-017, une base existante ne s'aligne pas par le seul changement des fichiers : appliquer uniquement après autorisation la procédure de reconstruction suivante. Une conservation sans reconstruction exige une compatibilité vérifiée de sa structure et de son historique `migrations`.
+
+<a id="reconstruire-une-base-locale-après-consolidation"></a>
+
+### Reconstruire une base locale après consolidation
+
+Cette opération supprime toutes les tables et données de la base choisie. Elle nécessite un accord explicite désignant l'installation et chacune des bases à reconstruire ; un accord sur les migrations n'autorise pas les autres installations. Sur une base à conserver, arrêter et faire définir une procédure compatible. Ne supprimer ni volume, schéma ou rôle, ni clé applicative ; ne pas rejouer les scripts PostgreSQL d'initialisation.
+
+1. Vérifier la racine, l'identité Compose, les montages et les volumes de l'installation. Arrêter ses consommateurs et les tests concurrents avec `./vendor/bin/sail stop laravel.test horizon reverb scheduler vite`, en conservant PostgreSQL et Redis. Les commandes ponctuelles passent par `./vendor/bin/sail --profile tools run ...` ; `sail run` seul désigne une autre commande du lanceur.
+2. Choisir explicitement `migration_database=laravel` ou `migration_database=testing`. Reprendre le contrôle de cible de la section migrateur : environnement local non caché, service `pgsql` de cette installation, session `epr_migrator`, rôle `epr_owner`, schéma `epr` et base choisie. Inventorier tables, données, historique, fonctions et permissions locales à rétablir. Une dépendance ou donnée inattendue modifiant les hypothèses de l'accord arrête la reconstruction concernée.
+3. Sauvegarder et vérifier chaque cible avant destruction. Conserver la révision correspondante, l'inventaire, les permissions locales et le reçu `.epr-local/identity-<base>.json` s'il existe dans un dossier privé protégé, exclu de Git, des images et des archives partagées. Comparer les identités du reçu aux comptes réellement présents ; une divergence ou un reçu incomplet doit être examiné, sans suppression automatique.
+
+Exemple de sauvegarde d'une cible déjà vérifiée, dans un dossier neuf et privé :
+
+```sh
+umask 077
+backup_dir=$(mktemp -d project-management/local/database-backup.XXXXXX)
+backup_file="$backup_dir/$migration_database.dump"
+./vendor/bin/sail exec -T pgsql sh -ec '
+PGPASSWORD="$(cat /run/secrets/postgres_backup_password)"
+export PGPASSWORD
+exec pg_dump --host=127.0.0.1 --username=epr_backup --no-password --format=custom --dbname="$1"
+' sh "$migration_database" > "$backup_file"
+test -s "$backup_file"
+./vendor/bin/sail exec -T pgsql pg_restore --list < "$backup_file" > "$backup_dir/toc.txt"
+./vendor/bin/sail exec -T pgsql pg_restore --file=/dev/null < "$backup_file"
+sha256sum "$backup_file" > "$backup_dir/sha256.txt"
+```
+
+Arrêter au premier code non nul. L'inventaire et le décodage vérifient la lisibilité complète de l'archive, sans restaurer ni modifier une autre base ; ils ne remplacent pas un exercice de restauration. Conserver aussi une copie privée du reçu avant la suite.
+
+4. `migrate:fresh` ne supprime pas les fonctions PostgreSQL. Sur une cible possédant les sept fonctions IdentityAccess, les retirer explicitement, après examen de leurs signatures et dépendances, avec la même cible migratrice vérifiée :
+
+```sh
+./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$migration_database" migrator tinker --execute '
+DB::transaction(function (): void {
+    DB::unprepared("DROP FUNCTION epr.identity_access_admit_session(text,uuid,text);
+DROP FUNCTION epr.identity_access_assert_actor(uuid,uuid,text);
+DROP FUNCTION epr.identity_access_revoke_session(text);
+DROP FUNCTION epr.identity_access_start_session(uuid,uuid,text,text,text);
+DROP FUNCTION epr.identity_access_rehash_password(uuid,text,text);
+DROP FUNCTION epr.identity_access_resolve_identity(uuid,text);
+DROP FUNCTION epr.identity_access_find_identity(text);");
+});'
+```
+
+Une base neuve sans ces fonctions ne nécessite pas leur retrait. Un inventaire partiel ou différent nécessite une inspection ; ne pas ajouter `CASCADE` ou masquer la dérive pour poursuivre. Après une interruption, constater les objets réellement présents avant reprise.
+
+5. Reconstruire les tables, sans semis global et sans dépendre des anciens `down()` :
+
+```sh
+./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$migration_database" migrator migrate:fresh --no-interaction
+./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$migration_database" migrator migrate:status --no-interaction
+```
+
+Vérifier ensuite structure finale, propriétaires `epr_owner`, fonctions, contraintes et permissions effectives. Les créations et leurs révocations sont transactionnelles ; aucun rôle applicatif ne devient propriétaire. Les `down()` des migrations retirent leurs objets et ne restaurent aucune donnée supprimée. Une reprise depuis sauvegarde nécessite le code et la procédure de restauration correspondant à cette sauvegarde.
+
+6. Après reconstruction vérifiée de la cible, archiver son seul ancien reçu `.epr-local/identity-<base>.json` dans le dossier privé de l'opération, sans écraser de fichier existant. Ne pas nettoyer globalement `.epr-local/`. Puis exécuter la préparation explicite ci-dessous avec `DB_DATABASE` et `--target` désignant cette même base. Vérifier deux ateliers et huit comptes, les identifiants et rôles attendus et la concordance du nouveau reçu avec SQL. Les nouveaux UUID rendent les anciennes connexions caduques ; les logins et le mot de passe synthétique restent ceux de la recette. Si la préparation est interrompue, comparer reçu et base avant de reprendre, sans effacer aveuglément le reçu.
+7. Réappliquer les seuls droits locaux de consultation qui étaient déjà autorisés : la recréation des tables retire leurs grants particuliers. Ne pas inscrire de rôle propre à un poste dans les migrations communes, ni ouvrir les métadonnées de sessions. Conserver les secrets et les rôles existants.
+8. Reprendre les services selon le démarrage quotidien, vérifier HTTP, connexion/déconnexion, SQL/Redis et accès de consultation, puis les tests sur `testing`. Ne purger ni Redis ni les volumes. Traiter chaque autre cible uniquement dans son autorisation et après ses propres contrôles/sauvegardes.
+
 ### Préparer explicitement les comptes synthétiques
 
 Après les migrations, sur une cible locale autorisée vide uniquement, initialiser séparément les huit comptes de `laravel` et ceux de `testing` :
@@ -139,7 +206,7 @@ Après les migrations, sur une cible locale autorisée vide uniquement, initiali
 
 Chaque cible reçoit deux ateliers avec responsable, agent et deux emprunteurs. Ces huit comptes de démonstration utilisent tous le mot de passe `password`, uniquement pour ces cibles locales. Leurs identifiants et le mot de passe sont également fournis dans `.epr-local/identity-laravel.json` ou `identity-testing.json`, en lecture privée locale. Les mots de passe sont hachés en base par Laravel. La préparation exige l'environnement `local`, la session migratrice et le rôle propriétaire ; HTTP et les tests n'acquièrent aucun droit de création de comptes. Aucun semis global n'est exécuté au lancement des tests.
 
-Une répétition sur une cible peuplée ou un reçu déjà présent est refusée, sans changement de compte ou de mot de passe. Le reçu privé est écrit et synchronisé avant la transaction SQL : après interruption, conserver le reçu et comparer la cible avant toute reprise ; sa présence seule ne prouve pas le commit. La transition d'une ancienne base contenant des comptes exige leur correspondance explicite selon EPR-T-018 ; ne pas supprimer les lignes pour franchir la garde.
+Une répétition sur une cible peuplée ou un reçu déjà présent est refusée, sans changement de compte ou de mot de passe. Le reçu privé est écrit et synchronisé avant la transaction SQL : après interruption, conserver le reçu et comparer la cible avant toute reprise ; sa présence seule ne prouve pas le commit. Après une reconstruction explicitement autorisée et vérifiée, l'ancien reçu de cette seule cible est archivé selon la procédure précédente, puis un nouveau reçu est créé avec les comptes réellement préparés. Hors de ce cas, conserver comptes et reçu ; toute divergence nécessite une inspection.
 
 ### SMTP de développement
 

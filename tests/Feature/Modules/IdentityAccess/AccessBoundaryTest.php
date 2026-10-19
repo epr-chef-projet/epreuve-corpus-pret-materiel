@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -21,6 +22,74 @@ use Tests\TestCase;
 final class AccessBoundaryTest extends TestCase
 {
     use DatabaseTransactions;
+
+    public function test_creates_the_identity_references_without_unused_starter_tables(): void
+    {
+        foreach (['identity_access_workshops', 'identity_access_users', 'identity_access_auth_sessions'] as $table) {
+            $this->assertTrue(Schema::hasTable($table), $table);
+        }
+        foreach (['users', 'identity_access_legacy_users', 'passkeys', 'password_reset_tokens', 'sessions', 'cache', 'cache_locks', 'jobs', 'job_batches'] as $table) {
+            $this->assertFalse(Schema::hasTable($table), $table);
+        }
+        $this->assertTrue(Schema::hasColumn('identity_access_auth_sessions', 'session_key_ciphertext'));
+        $this->assertFalse(Schema::hasColumn('identity_access_auth_sessions', 'session_id_ciphertext'));
+    }
+
+    public function test_identity_functions_keep_their_owner_safe_search_path_and_exact_sql_audience(): void
+    {
+        $audiences = [
+            'identity_access_find_identity(text)' => 'auth_lookup',
+            'identity_access_resolve_identity(uuid,text)' => 'auth_lookup',
+            'identity_access_rehash_password(uuid,text,text)' => 'auth_lookup',
+            'identity_access_start_session(uuid,uuid,text,text,text)' => 'auth_lookup',
+            'identity_access_revoke_session(text)' => 'auth_lookup',
+            'identity_access_assert_actor(uuid,uuid,text)' => 'pgsql',
+            'identity_access_admit_session(text,uuid,text)' => 'pgsql',
+        ];
+        foreach (['pgsql', 'auth_lookup'] as $connection) {
+            foreach ($audiences as $signature => $audience) {
+                $function = DB::connection($connection)->selectOne(<<<'SQL'
+SELECT owner.rolname AS owner, p.prosecdef AS definer, p.proconfig::text AS settings,
+       has_function_privilege(current_user, p.oid, 'EXECUTE') AS allowed,
+       EXISTS (SELECT FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+               WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE') AS public_execute
+FROM pg_proc p JOIN pg_roles owner ON owner.oid = p.proowner
+WHERE p.oid = to_regprocedure(?)
+SQL, ['epr.'.$signature]);
+                $this->assertNotNull($function, $signature);
+                $this->assertSame('epr_owner', $function->owner);
+                $this->assertTrue($function->definer);
+                $this->assertSame('{"search_path=pg_catalog, epr, pg_temp"}', $function->settings);
+                $this->assertFalse($function->public_execute);
+                $this->assertSame($connection === $audience, $function->allowed, $connection.': '.$signature);
+            }
+        }
+    }
+
+    public function test_session_creation_refuses_malformed_or_duplicate_private_keys(): void
+    {
+        $lookup = DB::connection('auth_lookup');
+        $user = Accounts::user();
+        $hmac = str_repeat('a', 64);
+        $token = str_repeat('b', 64);
+        $start = static function (string $key, string $broadcast) use ($lookup, $user): void {
+            $lookup->transaction(fn () => $lookup->select('SELECT epr.identity_access_start_session(?::uuid, ?::uuid, ?, ?, ?)', [$user['id'], (string) Str::uuid7(), $key, 'synthetic-ciphertext', $broadcast]));
+        };
+        $start($hmac, $token);
+        foreach ([
+            [str_repeat('z', 64), str_repeat('c', 64), '23514'],
+            [str_repeat('d', 64), str_repeat('z', 64), '23514'],
+            [$hmac, str_repeat('e', 64), '23505'],
+            [str_repeat('f', 64), $token, '23505'],
+        ] as [$key, $broadcast, $state]) {
+            try {
+                $start($key, $broadcast);
+                $this->fail('An invalid or duplicate private session key was accepted.');
+            } catch (QueryException $error) {
+                $this->assertSame($state, $error->errorInfo[0] ?? null);
+            }
+        }
+    }
 
     public function test_sql_diagnostics_do_not_copy_bound_credentials_or_native_query_text(): void
     {
@@ -69,11 +138,6 @@ final class AccessBoundaryTest extends TestCase
     #[DataProvider('tableCases')]
     public function test_runtime_cannot_write_global_identity_references(string $connection, string $table): void
     {
-        if (! in_array($table, ['identity_access_users', 'identity_access_workshops', 'identity_access_auth_sessions'], true)) {
-            $this->assertFalse(DB::connection($connection)->selectOne('SELECT has_table_privilege(current_user, ?, ?) AS allowed', ['epr.'.$table, 'INSERT, UPDATE, DELETE'])->allowed);
-
-            return;
-        }
         foreach (['insert', 'update', 'delete'] as $operation) {
             try {
                 DB::connection($connection)->transaction(function () use ($connection, $table, $operation): void {
@@ -108,7 +172,7 @@ final class AccessBoundaryTest extends TestCase
     {
         $cases = [];
         foreach (['pgsql', 'auth_lookup'] as $connection) {
-            foreach (['identity_access_users', 'identity_access_workshops', 'identity_access_auth_sessions', 'identity_access_legacy_users', 'passkeys', 'sessions', 'password_reset_tokens'] as $table) {
+            foreach (['identity_access_users', 'identity_access_workshops', 'identity_access_auth_sessions'] as $table) {
                 $cases[] = [$connection, $table];
             }
         }

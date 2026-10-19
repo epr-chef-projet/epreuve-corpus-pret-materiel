@@ -4,7 +4,7 @@ Ces guides décrivent les méthodes réutilisables pour travailler avec la stack
 
 | Besoin                                             | Guide                                                   | Version |
 | -------------------------------------------------- | ------------------------------------------------------- | ------- |
-| Créer une nouvelle base Laravel                    | [Initialisation](initialisation.md)                     | 1.3     |
+| Créer une nouvelle base Laravel                    | [Initialisation](initialisation.md)                     | 1.4     |
 | Préparer un poste et utiliser Docker/Sail          | [Environnement Docker](environnement-docker.md)         | 1.2     |
 | Organiser, partager et entretenir les références   | [Documentation et partage](documentation-et-partage.md) | 1.2     |
 | Préparer GitHub/CI, contribuer, revoir et intégrer | [GitHub et collaboration](github-et-collaboration.md)   | 1.2     |

@@ -10,21 +10,31 @@ permissions:
     actions: read
 
 concurrency:
-    group: base-pr-${{ github.event.pull_request.number }}
+    group: base-pr-${{ github.event.pull_request.number }}${{ github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null) && '-metadata' || '' }}
     cancel-in-progress: true
 
 jobs:
     validation:
+        if: ${{ github.event.action != 'edited' || github.event.changes.base != null || (github.event.changes.title == null && github.event.changes.body == null) }}
         uses: ./.github/workflows/base-common.yml
 
     base-pr:
-        name: base-pr
+        name: ${{ github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null) && 'pr-metadata' || 'base-pr' }}
         needs: validation
         if: ${{ always() }}
         runs-on: ubuntu-24.04
         timeout-minutes: 3
+        env:
+            TEXT_ONLY: ${{ github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null) }}
         steps:
+            - name: Constater une modification du texte seulement
+              if: ${{ env.TEXT_ONLY == 'true' }}
+              env:
+                  RESULT: ${{ needs.validation.result }}
+              run: test "$RESULT" = skipped
+
             - name: Exiger les preuves de cette proposition
+              if: ${{ env.TEXT_ONLY != 'true' }}
               env:
                   RESULT: ${{ needs.validation.result }}
                   VALIDATED: ${{ needs.validation.outputs.validated }}

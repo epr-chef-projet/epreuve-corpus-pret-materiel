@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 return [
 
+    'history' => [
+        'encrypt' => true,
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Server Side Rendering

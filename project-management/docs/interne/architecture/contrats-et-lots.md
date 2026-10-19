@@ -1,6 +1,6 @@
 # Contrats publics et dépendances d'intégration
 
-**Version 1.1 — contrats d'intégration.** [Architecture](../../cahiers-des-charges/technique/architecture-contrats.md) et [transactions](../../cahiers-des-charges/technique/transactions-etats.md) possèdent les choix de conception ; ce document possède les formes exactes. Les noms d'opérations ci-dessous sont des signatures sémantiques à implémenter, pas du code fourni ni une qualification acquise.
+**Version 1.3 - contrats d'intégration.** [Architecture](../../cahiers-des-charges/technique/architecture-contrats.md) et [transactions](../../cahiers-des-charges/technique/transactions-etats.md) possèdent les choix de conception ; ce document possède les formes exactes. Les noms d'opérations ci-dessous sont des signatures sémantiques à implémenter, pas du code fourni ni une qualification acquise.
 
 <a id="vocabulaire"></a>
 
@@ -38,9 +38,21 @@ Les clés inconnues sont rejetées. Entiers JSON ou chaînes décimales de chiff
 
 `EquipmentData/State` : `equipmentId`, `name`, `description`, `category`, `totalQuantity`, `status`, `equipmentVersion`, `image: ImagePublishedData|null`. Image publiée : `imageId`, `generation`, `thumbnail` et `detail`, chacun `{url,width,height,mimeType:"image/webp"}` ; les dimensions vérifiées sont stockées à la publication, les URLs sont des routes privées. `CommitmentTotals` : `equipmentId`, `reservedQuantity`, `handedOverQuantity`. Ces données intermodules ne sont pas exposées intégralement au navigateur. Les appels d'agrégat portant sur une union de 200 sont fractionnés en lots ≤100. Les exceptions publiques utiles sont celles de la section erreurs.
 
+### Accès et unités SQL utilisables
+
+`IdentityAccess/PublicApi/ResolveActor::handle(Request)` produit le contexte depuis la session serveur revalidée, y compris lors d'un appel direct. `AuthorizeActor::handle(context, ability)` recontrôle l'identité courante et applique les capacités fermées `borrow`, `operate-loans`, `manage-catalog` ; une capacité inconnue est refusée. Les Gates HTTP utilisent la même matrice. Les actions des consommateurs peuvent ainsi autoriser un contexte sans importer le modèle interne d'utilisateur.
+
+`App\Modules\IdentityAccess\PublicApi\SqlUnit::forActor(context, closure)` ouvre l'unité sur la connexion métier `pgsql` (connexion logique `app` du CDC), vérifie l'identité courante et établit les paramètres PostgreSQL locaux avant le travail. Cette capacité appartient à IdentityAccess, qui possède la résolution de l'autorité et son établissement SQL ; les consommateurs passent par son API publique. `forActor(ActorContext, Closure(): void): void` appelle le travail sans argument et ne retourne aucune valeur. Le cas d'usage propriétaire constitue son résultat matérialisé ; la capacité ne lui transmet ni connexion, ni modèle, ni builder, ni chargement différé. L'unité fixe localement `lock_timeout=2s` et `statement_timeout=5s` ; elle n'effectue pas de rejeu automatique. Les repositories participants appellent `assertActor(connection, context): void` avant leur premier accès protégé, en fournissant leur propre connexion ; cette garde refuse absence de transaction, autre connexion ou contexte différent. Une unité imbriquée ne change pas silencieusement d'atelier, d'acteur ou de capacité.
+
+`forService(ServiceContext, Closure(): void): void` suit le même contrat de travail sans argument ni résultat et exige l'identité et la capacité configurées du processus (`IDENTITY_SERVICE_ID`, `IDENTITY_SERVICE_CAPABILITIES`), sans rôle utilisateur. Aucun droit de service n'est activé par défaut dans HTTP. La seule capacité introduite pour les sessions est `identity_access.publish` ; les futures capacités de traitement doivent être ajoutées avec leurs usages et preuves.
+
+`AdmitSessionPublication::handle(service, actorId, role, broadcastToken)` est réservé au producteur ayant déjà établi l'audience autorisée depuis sa source métier. Il ne recherche pas des destinataires à partir d'une demande navigateur. Il rend `null` ou `{channel,authGeneration}` après vérification du même atelier, du compte/rôle courant, de l'expiration/révocation et de la session vivante via le handler Laravel configuré. Il partage le verrou de la ligne de session avec la révocation : une admission acquise avant celle-ci peut déjà être engagée ; aucune nouvelle admission après sa validation. Le résultat est destiné à la publication immédiatement admise, pas à un cache de routes réutilisables. Aucun identifiant de session ni ciphertext n'est transmis au publisher. L'abonnement navigateur et la qualification du socket maintenu après sortie complètent ce contrat avec le cadre frontend.
+
 <a id="commandes"></a>
 
 ## 3. Commandes et résultats HTTP
+
+La prop `auth.user` est nulle pour un invité. Pour le compte courant, `IdentityAccess/Identity/Data/AuthenticatedUserData` expose uniquement `id`, `login`, `displayName`, `workshopId`, `workshopName` (chaînes) et `role` (`borrower|staff|manager`). Ces six propriétés sont `readonly` après construction ; un changement produit une nouvelle valeur. La classe conserve l'héritage Laravel Data, la sérialisation explicite sans SQL et la génération TypeScript depuis sa déclaration PHP. Ce DTO de présentation n'est ni une autorité fournie par le navigateur ni un modèle public intermodule.
 
 Toutes les commandes métier reçoivent `operationKey` ; les identifiants de route sont contrôlés dans le contexte courant. Le corps de création d'un brouillon comporte `items: [{equipmentId, quantity}]`. Sauvegarde de brouillon et remplacement transmettent la liste complète et `expectedVersion` ; retrait signifie omission explicite dans cette proposition complète. Confirmation transmet `expectedVersion` et `locale: fr|en`, fixée uniquement lors de la première réussite. Connexion/déconnexion conservent leur contrat de session distinct.
 

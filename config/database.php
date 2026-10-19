@@ -48,6 +48,19 @@ return [
 
     'connections' => [
 
+        'auth_lookup' => [
+            'driver' => 'pgsql',
+            'host' => env('DB_HOST', '127.0.0.1'),
+            'port' => env('DB_PORT', '5432'),
+            'database' => env('DB_DATABASE', 'laravel'),
+            'username' => 'epr_auth_lookup',
+            'password' => env('AUTH_LOOKUP_PASSWORD'),
+            'charset' => 'utf8',
+            'prefix' => '',
+            'search_path' => 'epr',
+            'sslmode' => env('DB_SSLMODE', 'prefer'),
+        ],
+
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
@@ -201,6 +214,8 @@ return [
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
             'database' => env('REDIS_SESSION_DB', '2'),
+            'timeout' => 1.0,
+            'read_timeout' => 1.0,
         ],
 
     ],

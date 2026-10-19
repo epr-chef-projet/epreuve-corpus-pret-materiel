@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -53,6 +54,24 @@ return [
     */
 
     'channels' => [
+
+        'identity' => [
+            'name' => 'identity',
+            'driver' => 'daily',
+            'path' => storage_path('logs/identity.log'),
+            'days' => 14,
+            'level' => 'error',
+            'formatter' => JsonFormatter::class,
+        ],
+
+        'runtime' => [
+            'name' => 'runtime',
+            'driver' => 'daily',
+            'path' => storage_path('logs/runtime.log'),
+            'days' => 14,
+            'level' => 'error',
+            'formatter' => JsonFormatter::class,
+        ],
 
         'stack' => [
             'driver' => 'stack',

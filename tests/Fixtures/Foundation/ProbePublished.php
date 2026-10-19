@@ -9,7 +9,7 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 
 final readonly class ProbePublished implements ShouldBroadcastNow
 {
-    public function __construct(public int $userId, public string $marker) {}
+    public function __construct(public string $userId, public string $marker) {}
 
     /** @return list<PrivateChannel> */
     public function broadcastOn(): array

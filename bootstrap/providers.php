@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Modules\IdentityAccess\Providers\FortifyServiceProvider;
+use App\Modules\IdentityAccess\Providers\IdentityAccessServiceProvider;
 use App\Providers\AppServiceProvider;
-use App\Providers\FortifyServiceProvider;
 
 return [
     AppServiceProvider::class,
     FortifyServiceProvider::class,
+    IdentityAccessServiceProvider::class,
 ];

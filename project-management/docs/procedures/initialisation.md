@@ -1,6 +1,6 @@
 # Initialiser un projet Laravel avec Docker et Sail
 
-**Version 1.3 — contenu validé ; parcours opérationnel à exercer.** Commandes et interfaces examinées dans les sources officielles Laravel 13, Inertia 3 et des outils cités. Vérifier leur compatibilité avec les versions retenues avant application ; ce document n'adopte pas ces versions pour le projet.
+**Version 1.4 - contenu validé ; parcours opérationnel à exercer.** Commandes et interfaces examinées dans les sources officielles Laravel 13, Inertia 3 et des outils cités. Vérifier leur compatibilité avec les versions retenues avant application ; ce document n'adopte pas ces versions pour le projet.
 
 **Résultat :** un squelette officiel avec le frontend sélectionné, les services nécessaires raccordés, des dépendances verrouillées et une recette de reprise partageable. Cette procédure crée une base technique, sans fonctionnalités métier, publication GitHub, image de production ou livraison serveur.
 
@@ -175,6 +175,8 @@ docker compose build laravel.test
 Vérifier les arguments de construction effectifs. Une version Node renseignée dans `.env` ne change le runtime que si Compose la transmet à l'argument `NODE_VERSION` du Dockerfile concerné. Si des extensions ou fichiers du runtime doivent être adaptés, publier sa recette avec `php artisan sail:publish` dans le runtime disponible, conserver la source partagée, revoir le contexte/nom d'image puis reconstruire. Ne pas modifier seulement un fichier de `vendor/` qui sera remplacé à la prochaine installation.
 
 ### Base et identités
+
+Examiner les migrations fournies par le squelette ou les installateurs avant leur première exécution. Les adapter au périmètre de la base à remettre et retirer les créations ou modifications inutilisées après vérification de leurs dépendances. Les tables métier appartiennent à leurs modules ; les tables techniques communes réellement nécessaires peuvent rester dans `database/`. Appliquer R05 pour la syntaxe, la consolidation initiale et l’éventuelle reconstruction d’une base déjà préparée.
 
 Pour PostgreSQL, préparer la recette SQL avant le premier démarrage : nom de base et schéma, compte de provisionnement, comptes applicatif/migrateur et droits. Le compte qui initialise l'image PostgreSQL ne devient pas automatiquement un compte applicatif restreint. Avec des comptes séparés, adapter les paramètres `POSTGRES_*` du service pour le provisionnement ; `DB_USERNAME`/`DB_PASSWORD` de Laravel désignent l'identité applicative.
 
@@ -414,6 +416,8 @@ La publication du port doit appartenir au service qui exécute réellement ce pr
 ### Examiner et améliorer les configurations reçues
 
 Les fichiers d'un installateur sont un point de départ. La personne chargée de l'initialisation les examine et prend les initiatives techniques nécessaires pour atteindre les exigences reçues ; cette revue s'applique également à un squelette minimal. Distinguer adaptation au profil, correction d'un défaut et optimisation. Expliquer les changements utiles dans leur recette et vérifier leurs effets, sans reproduire automatiquement des réglages d'un autre projet.
+
+Retirer les fichiers et dossiers hérités devenus inutiles après vérification de leurs références. Conserver les éléments communs utilisés ainsi que les emplacements nécessaires au fonctionnement, même lorsqu’ils sont temporairement vides. Reprendre ce nettoyage lors des réorganisations ultérieures.
 
 | Configuration           | Points à examiner avant réception                                                                                                                                                                   |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

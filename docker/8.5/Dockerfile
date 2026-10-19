@@ -23,8 +23,7 @@ RUN echo "Acquire::http::Pipeline-Depth 0;" > /etc/apt/apt.conf.d/99custom && \
     echo "Acquire::http::No-Cache true;" >> /etc/apt/apt.conf.d/99custom && \
     echo "Acquire::BrokenProxy    true;" >> /etc/apt/apt.conf.d/99custom
 
-ARG EPR_CACHE_REFRESH=local
-RUN test -n "$EPR_CACHE_REFRESH" && apt-get update && apt-get upgrade -y \
+RUN apt-get update && apt-get upgrade -y \
     && mkdir -p /etc/apt/keyrings \
     && apt-get install -y gnupg gosu curl ca-certificates zip unzip git supervisor sqlite3 libcap2-bin libpng-dev python3 dnsutils librsvg2-bin fswatch ffmpeg nano \
     && curl -sSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb \
@@ -82,8 +81,6 @@ RUN if [ -n "$PHP_EXTENSIONS" ]; then \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*; \
 fi
 
-RUN setcap "cap_net_bind_service=+ep" /usr/bin/php8.5
-
 RUN userdel -r ubuntu
 RUN groupadd --force -g $WWWGROUP sail
 RUN useradd -ms /bin/bash --no-user-group -g $WWWGROUP -u 1337 sail
@@ -93,6 +90,14 @@ COPY start-container /usr/local/bin/start-container
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY php.ini /etc/php/8.5/cli/conf.d/99-sail.ini
 RUN chmod +x /usr/local/bin/start-container
+
+# Refresh installed packages after the stable tools, restoring npm and PHP capabilities if replaced.
+ARG EPR_CACHE_REFRESH=local
+RUN test -n "$EPR_CACHE_REFRESH" && apt-get update && apt-get upgrade -y --with-new-pkgs \
+    && if [ "$(npm --version)" != "11.21.0" ]; then npm install -g npm@11.21.0; fi \
+    && apt-get -y autoremove && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && setcap "cap_net_bind_service=+ep" /usr/bin/php8.5
 
 EXPOSE 80/tcp
 

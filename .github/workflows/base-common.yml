@@ -105,7 +105,10 @@ jobs:
               uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
               with:
                   path: ${{ runner.temp }}/build-cache/runtime
-                  key: ci-v1-sail-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.day }}-${{ steps.prepare.outputs.source }}
+                  key: ci-v2-sail-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ steps.prepare.outputs.day }}
+                  restore-keys: |
+                      ci-v2-sail-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-
+                      ci-v2-sail-${{ runner.os }}-${{ runner.arch }}-
 
             - name: Restaurer les couches de production
               id: cache-production
@@ -114,7 +117,11 @@ jobs:
               uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
               with:
                   path: ${{ runner.temp }}/build-cache/production
-                  key: ci-v1-production-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.day }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('.dockerignore', 'docker/production/**', 'docker/imagick/policy.xml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json') }}
+                  key: ci-v2-production-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('.dockerignore', 'docker/production/**', 'docker/imagick/policy.xml') }}-${{ hashFiles('composer.json', 'composer.lock', 'package.json', 'package-lock.json') }}-${{ steps.prepare.outputs.day }}
+                  restore-keys: |
+                      ci-v2-production-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('.dockerignore', 'docker/production/**', 'docker/imagick/policy.xml') }}-${{ hashFiles('composer.json', 'composer.lock', 'package.json', 'package-lock.json') }}-
+                      ci-v2-production-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('.dockerignore', 'docker/production/**', 'docker/imagick/policy.xml') }}-
+                      ci-v2-production-${{ runner.os }}-${{ runner.arch }}-
 
             - name: Restaurer les téléchargements Composer et npm
               id: cache-downloads
@@ -124,13 +131,16 @@ jobs:
                   path: |
                       .epr-local/downloads/composer/files
                       .epr-local/downloads/npm/_cacache
-                  key: ci-v1-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepare.outputs.source }}-${{ hashFiles('composer.lock', 'package-lock.json') }}
+                  key: ci-v2-downloads-${{ runner.os }}-${{ runner.arch }}-php85-c2-node24-npm11-${{ hashFiles('composer.lock', 'package-lock.json') }}
+                  restore-keys: |
+                      ci-v2-downloads-${{ runner.os }}-${{ runner.arch }}-php85-c2-node24-npm11-
 
             - name: Écarter les restaurations incomplètes et construire le runtime
               env:
-                  RUNTIME_RESTORED: ${{ steps.cache-runtime.outcome == 'success' && steps.cache-runtime.outputs.cache-hit == 'true' }}
-                  PRODUCTION_RESTORED: ${{ steps.cache-production.outcome == 'success' && steps.cache-production.outputs.cache-hit == 'true' }}
-                  DOWNLOADS_RESTORED: ${{ steps.cache-downloads.outcome == 'success' && steps.cache-downloads.outputs.cache-hit == 'true' }}
+                  RUNTIME_RESTORED: ${{ steps.cache-runtime.outcome == 'success' && steps.cache-runtime.outputs.cache-matched-key != '' }}
+                  PRODUCTION_RESTORED: ${{ steps.cache-production.outcome == 'success' && steps.cache-production.outputs.cache-matched-key != '' }}
+                  DOWNLOADS_RESTORED: ${{ steps.cache-downloads.outcome == 'success' && steps.cache-downloads.outputs.cache-matched-key != '' }}
+                  RUNTIME_PRIMARY_HIT: ${{ steps.cache-runtime.outputs.cache-hit == 'true' }}
                   CACHE_DAY: ${{ steps.prepare.outputs.day }}
               run: |
                   [[ "$RUNTIME_RESTORED" == true ]] || rm -rf "$RUNNER_TEMP/build-cache/runtime"
@@ -168,7 +178,7 @@ jobs:
                     options+=(--allow "fs.read=$RUNNER_TEMP/build-cache/runtime")
                     options+=(--set "*.cache-from=type=local,src=$RUNNER_TEMP/build-cache/runtime")
                   fi
-                  if [[ "$CACHE_WRITE" == true && "$RUNTIME_RESTORED" != true ]]; then
+                  if [[ "$CACHE_WRITE" == true && "$RUNTIME_PRIMARY_HIT" != true ]]; then
                     mkdir -p "$RUNNER_TEMP/build-cache-export/runtime"
                     options+=(--allow "fs.write=$RUNNER_TEMP/build-cache-export/runtime")
                     options+=(--set "*.cache-to=type=local,dest=$RUNNER_TEMP/build-cache-export/runtime,mode=min,ignore-error=true")
@@ -204,7 +214,6 @@ jobs:
                   done
                   ./vendor/bin/sail composer contracts:generate
                   ./vendor/bin/sail composer test:contracts
-                  ./vendor/bin/sail npm run build
                   runtime=$(sed -n 's/^EPR_RUNTIME_IMAGE="\(.*\)"$/\1/p' .env)
                   source=$(sed -n 's/^EPR_RUNTIME_SOURCE="\(.*\)"$/\1/p' .env)
                   printf 'root=%s\nproject=%s\nimage=%s\nsource=%s\n' \
@@ -255,7 +264,7 @@ jobs:
               id: image
               timeout-minutes: 20
               env:
-                  PRODUCTION_RESTORED: ${{ steps.cache-production.outcome == 'success' && steps.cache-production.outputs.cache-hit == 'true' }}
+                  PRODUCTION_PRIMARY_HIT: ${{ steps.cache-production.outputs.cache-hit == 'true' }}
               run: |
                   mkdir -p "$RUNNER_TEMP/image-context" "$RUNNER_TEMP/image-proof"
                   ./vendor/bin/sail exec -T laravel.test cat /usr/bin/composer > "$RUNNER_TEMP/composer.phar"
@@ -281,7 +290,7 @@ jobs:
                     printf 'builder=%s\nimageId=%s\n' "$builder" "$builder_id" > "$RUNNER_TEMP/image-proof/frontend-builder.txt"
                     cache_options=()
                     [[ ! -f "$RUNNER_TEMP/build-cache/production/index.json" ]] || cache_options+=(--cache-from "type=local,src=$RUNNER_TEMP/build-cache/production")
-                    if [[ "$CACHE_WRITE" == true && "$PRODUCTION_RESTORED" != true ]]; then
+                    if [[ "$CACHE_WRITE" == true && "$PRODUCTION_PRIMARY_HIT" != true ]]; then
                       cache_options+=(--cache-to "type=local,dest=$RUNNER_TEMP/build-cache-export/production,mode=max,ignore-error=true")
                     fi
                     docker buildx build --platform linux/amd64 --load --provenance=false "${cache_options[@]}" \
@@ -571,7 +580,7 @@ jobs:
                   foreach ([storage_path("fonts"), storage_path("app/private/pdf-assets")] as $directory) {
                       if (!is_dir($directory) && !mkdir($directory, 0700, true)) { throw new RuntimeException("PDF directory unavailable"); }
                   }
-                  $html = '<html><head><meta charset="utf-8"><style>body{font-family:DejaVu Sans;font-size:12pt}</style></head><body><h1>Prêt — Loan</h1><p>Équipement à vérifier : café, € et £.</p></body></html>';
+                  $html = '<html><head><meta charset="utf-8"><style>body{font-family:DejaVu Sans;font-size:12pt}</style></head><body><h1>Prêt - Loan</h1><p>Équipement à vérifier : café, € et £.</p></body></html>';
                   $document = Barryvdh\DomPDF\Facade\Pdf::loadHTML($html)->setPaper("a4");
                   $bytes = $document->output();
                   preg_match_all("~/BaseFont\s*/([^\s]+)~", $bytes, $fontMatches);
@@ -931,7 +940,7 @@ jobs:
                   if-no-files-found: error
 
             - name: Préparer les caches à conserver après réussite
-              if: ${{ success() && env.CACHE_WRITE == 'true' }}
+              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.receipt.outputs.validated == 'true' }}
               continue-on-error: true
               run: |
                   for name in runtime production; do
@@ -945,7 +954,7 @@ jobs:
 
             # Explicit saves only: no combined cache action or automatic post-job save.
             - name: Conserver les couches Sail
-              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.cache-runtime.outputs.cache-hit != 'true' }}
+              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.receipt.outputs.validated == 'true' && steps.cache-runtime.outputs.cache-hit != 'true' }}
               continue-on-error: true
               uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
               with:
@@ -953,7 +962,7 @@ jobs:
                   key: ${{ steps.cache-runtime.outputs.cache-primary-key }}
 
             - name: Conserver les couches de production
-              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.cache-production.outputs.cache-hit != 'true' }}
+              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.receipt.outputs.validated == 'true' && steps.cache-production.outputs.cache-hit != 'true' }}
               continue-on-error: true
               uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
               with:
@@ -961,7 +970,7 @@ jobs:
                   key: ${{ steps.cache-production.outputs.cache-primary-key }}
 
             - name: Conserver les téléchargements Composer et npm
-              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.cache-downloads.outputs.cache-hit != 'true' }}
+              if: ${{ success() && env.CACHE_WRITE == 'true' && steps.receipt.outputs.validated == 'true' && steps.cache-downloads.outputs.cache-hit != 'true' }}
               continue-on-error: true
               uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
               with:

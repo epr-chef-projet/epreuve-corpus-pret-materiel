@@ -12,11 +12,11 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 final class AuthenticatedUserData extends Data
 {
     public function __construct(
-        public string $id,
-        public string $login,
-        public string $displayName,
-        public string $workshopId,
-        public string $workshopName,
-        public Role $role,
+        public readonly string $id,
+        public readonly string $login,
+        public readonly string $displayName,
+        public readonly string $workshopId,
+        public readonly string $workshopName,
+        public readonly Role $role,
     ) {}
 }

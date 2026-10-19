@@ -1,6 +1,6 @@
 # Contrats publics et dépendances d'intégration
 
-**Version 1.2 - contrats d'intégration.** [Architecture](../../cahiers-des-charges/technique/architecture-contrats.md) et [transactions](../../cahiers-des-charges/technique/transactions-etats.md) possèdent les choix de conception ; ce document possède les formes exactes. Les noms d'opérations ci-dessous sont des signatures sémantiques à implémenter, pas du code fourni ni une qualification acquise.
+**Version 1.3 - contrats d'intégration.** [Architecture](../../cahiers-des-charges/technique/architecture-contrats.md) et [transactions](../../cahiers-des-charges/technique/transactions-etats.md) possèdent les choix de conception ; ce document possède les formes exactes. Les noms d'opérations ci-dessous sont des signatures sémantiques à implémenter, pas du code fourni ni une qualification acquise.
 
 <a id="vocabulaire"></a>
 
@@ -51,6 +51,8 @@ Les clés inconnues sont rejetées. Entiers JSON ou chaînes décimales de chiff
 <a id="commandes"></a>
 
 ## 3. Commandes et résultats HTTP
+
+La prop `auth.user` est nulle pour un invité. Pour le compte courant, `IdentityAccess/Identity/Data/AuthenticatedUserData` expose uniquement `id`, `login`, `displayName`, `workshopId`, `workshopName` (chaînes) et `role` (`borrower|staff|manager`). Ces six propriétés sont `readonly` après construction ; un changement produit une nouvelle valeur. La classe conserve l'héritage Laravel Data, la sérialisation explicite sans SQL et la génération TypeScript depuis sa déclaration PHP. Ce DTO de présentation n'est ni une autorité fournie par le navigateur ni un modèle public intermodule.
 
 Toutes les commandes métier reçoivent `operationKey` ; les identifiants de route sont contrôlés dans le contexte courant. Le corps de création d'un brouillon comporte `items: [{equipmentId, quantity}]`. Sauvegarde de brouillon et remplacement transmettent la liste complète et `expectedVersion` ; retrait signifie omission explicite dans cette proposition complète. Confirmation transmet `expectedVersion` et `locale: fr|en`, fixée uniquement lors de la première réussite. Connexion/déconnexion conservent leur contrat de session distinct.
 

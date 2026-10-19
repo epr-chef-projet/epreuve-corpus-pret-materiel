@@ -9,6 +9,7 @@ use App\Modules\IdentityAccess\Identity\Models\User;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
 
 final class StartSessionAction
 {
@@ -24,6 +25,7 @@ final class StartSessionAction
             $request->session()->put('identity_access.role', $user->role);
             $request->session()->put('identity_access.expires_at', now()->addHours(2)->getTimestamp());
             $request->session()->put('identity_access.auth_generation', 1);
+            Inertia::clearHistory();
         } catch (\Throwable $error) {
             Auth::guard('web')->logout();
             $request->session()->invalidate();

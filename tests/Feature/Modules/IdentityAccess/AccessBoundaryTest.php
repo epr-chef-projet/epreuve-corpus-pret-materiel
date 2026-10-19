@@ -132,7 +132,38 @@ SQL, ['epr.'.$signature]);
         $serialized = $data->toArray();
         $this->assertSame(['id', 'login', 'displayName', 'workshopId', 'workshopName', 'role'], array_keys($serialized));
         $this->assertSame('manager', $serialized['role']);
+        $this->assertSame($serialized, json_decode($data->toJson(), true, flags: JSON_THROW_ON_ERROR));
+        $this->assertSame($serialized, AuthenticatedUserData::from($serialized)->toArray());
         $this->assertSame(0, $queries);
+    }
+
+    #[DataProvider('identityProperties')]
+    public function test_identity_values_cannot_be_modified_after_construction(string $property, string|Role $replacement): void
+    {
+        $user = Accounts::user();
+        $data = new AuthenticatedUserData($user['id'], $user['login'], $user['displayName'], $user['workshopId'], 'Atelier 1', Role::Borrower);
+        $original = $data->{$property};
+        $rejected = false;
+        try {
+            $data->{$property} = $replacement;
+        } catch (\Error) {
+            $rejected = true;
+        }
+        $this->assertTrue($rejected, 'An identity value was mutable: '.$property);
+        $this->assertSame($original, $data->{$property});
+    }
+
+    /** @return list<array{string, string|Role}> */
+    public static function identityProperties(): array
+    {
+        return [
+            ['id', '01900000-0000-7000-8000-000000000001'],
+            ['login', 'another-account'],
+            ['displayName', 'Another synthetic account'],
+            ['workshopId', '01900000-0000-7000-8000-000000000002'],
+            ['workshopName', 'Another workshop'],
+            ['role', Role::Manager],
+        ];
     }
 
     #[DataProvider('tableCases')]

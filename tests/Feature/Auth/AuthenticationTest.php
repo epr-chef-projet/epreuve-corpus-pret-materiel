@@ -7,6 +7,7 @@ namespace Tests\Feature\Auth;
 use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
 use App\Modules\IdentityAccess\Identity\UseCases\Authenticate\IdentityRepository;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;
 
@@ -40,6 +41,44 @@ class AuthenticationTest extends TestCase
     public function test_login_screen_can_be_rendered(): void
     {
         $this->get('/login')->assertOk();
+    }
+
+    public function test_new_login_rotates_encrypted_history_without_repeating_the_rotation_on_private_reads(): void
+    {
+        Accounts::signIn($this);
+        $page = $this->get('/dashboard')->assertOk()->viewData('page');
+        $this->assertTrue($page['encryptHistory'] ?? false);
+        $this->assertTrue($page['clearHistory'] ?? false);
+        $this->assertSame(Accounts::user()['login'], $page['props']['auth']['user']['login']);
+        $nextPage = $this->get('/dashboard')->assertOk()->viewData('page');
+        $this->assertTrue($nextPage['encryptHistory'] ?? false);
+        $this->assertFalse($nextPage['clearHistory'] ?? false);
+    }
+
+    #[DataProvider('sessionEnds')]
+    public function test_guest_pages_rotate_history_after_a_session_ends(string $reason): void
+    {
+        Accounts::signIn($this);
+        $this->get('/dashboard')->assertOk();
+        if ($reason === 'logout') {
+            $this->post('/logout')->assertRedirect('/');
+        } elseif ($reason === 'expired') {
+            $this->travel(120)->minutes();
+        } else {
+            session()->getHandler()->destroy(session()->getId());
+        }
+        $this->get('/dashboard')->assertRedirect('/login');
+        $this->assertGuest();
+        $page = $this->get('/login')->assertOk()->viewData('page');
+        $this->assertTrue($page['encryptHistory'] ?? false);
+        $this->assertTrue($page['clearHistory'] ?? false);
+        $this->assertNull($page['props']['auth']['user']);
+    }
+
+    /** @return list<array{string}> */
+    public static function sessionEnds(): array
+    {
+        return [['logout'], ['expired'], ['missing']];
     }
 
     public function test_precreated_users_authenticate_by_normalized_login(): void

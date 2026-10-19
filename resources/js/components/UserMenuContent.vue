@@ -16,6 +16,7 @@ type Props = {
 
 const handleLogout = () => {
     router.flushAll();
+    router.clearHistory();
 };
 
 defineProps<Props>();

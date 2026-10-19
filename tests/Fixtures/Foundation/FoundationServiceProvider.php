@@ -9,6 +9,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Vite;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -43,6 +44,18 @@ final class FoundationServiceProvider extends ServiceProvider
                 event(new ProbePublished($user->id, 'server-marker'));
 
                 return response()->json(['published' => true]);
+            });
+            Route::post('/__foundation/end-session', static function (Request $request): HttpResponse {
+                $reason = $request->input('reason');
+                abort_unless(in_array($reason, ['expired', 'missing'], true), 422);
+                if ($reason === 'expired') {
+                    $request->session()->put('identity_access.expires_at', now()->subSecond()->getTimestamp());
+                } else {
+                    $request->session()->invalidate();
+                    $request->session()->regenerateToken();
+                }
+
+                return response()->noContent();
             });
         });
         $this->app->afterResolving(Schedule::class, static function (Schedule $schedule): void {

@@ -17,6 +17,9 @@ final class ShareIdentity
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
+        if (! $user instanceof User) {
+            Inertia::clearHistory();
+        }
         Inertia::share('auth', [
             'user' => $user instanceof User ? (new AuthenticatedUserData($user->id, $user->login, $user->display_name, $user->workshop_id, $user->workshop_name, Role::from($user->role)))->toArray() : null,
         ]);

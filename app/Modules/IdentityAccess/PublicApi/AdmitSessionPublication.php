@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Modules\IdentityAccess\PublicApi;
 
 use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
-use App\Shared\Database\SqlUnit;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Session\SessionManager;
@@ -26,10 +25,11 @@ final class AdmitSessionPublication
             return null;
         }
 
-        return $this->units->forService($service, function () use ($actorId, $role, $broadcastToken): ?array {
+        $route = null;
+        $this->units->forService($service, function () use ($actorId, $role, $broadcastToken, &$route): void {
             $candidate = $this->sessions->lockCandidate($actorId, $role, $broadcastToken);
             if ($candidate === null) {
-                return null;
+                return;
             }
             try {
                 $sessionId = Crypt::decryptString($candidate->session_key_ciphertext);
@@ -48,12 +48,14 @@ final class AdmitSessionPublication
                     && $probe->get('identity_access.expires_at', 0) > now()->getTimestamp();
                 unset($sessionId, $probe);
             } catch (DecryptException) {
-                return null;
+                return;
             } catch (\RedisException) {
-                return null;
+                return;
             }
 
-            return $live ? ['channel' => 'epr.session.'.$candidate->broadcast_token, 'authGeneration' => (int) $candidate->auth_generation] : null;
+            $route = $live ? ['channel' => 'epr.session.'.$candidate->broadcast_token, 'authGeneration' => (int) $candidate->auth_generation] : null;
         });
+
+        return $route;
     }
 }

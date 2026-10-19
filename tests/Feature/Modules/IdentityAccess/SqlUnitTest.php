@@ -7,11 +7,12 @@ namespace Tests\Feature\Modules\IdentityAccess;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\AuthorizeActor;
 use App\Modules\IdentityAccess\PublicApi\ServiceContext;
-use App\Shared\Database\SqlUnit;
+use App\Modules\IdentityAccess\PublicApi\SqlUnit;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use LogicException;
+use ReflectionMethod;
 use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;
 
@@ -22,6 +23,33 @@ final class SqlUnitTest extends TestCase
         $user = Accounts::user($login);
 
         return new ActorContext($user['id'], $user['workshopId'], $user['role']);
+    }
+
+    public function test_runs_actor_and_service_work_without_passing_a_connection_or_returning_a_value(): void
+    {
+        $actor = $this->actor('atelier-1-manager');
+        $units = app(SqlUnit::class);
+        $executed = [];
+
+        $units->forActor($actor, function () use ($units, $actor, &$executed): void {
+            $this->assertSame(0, func_num_args());
+            $units->assertActor(DB::connection('pgsql'), $actor);
+            $executed[] = 'actor';
+        });
+
+        config(['identity_access.service_id' => 'test-publisher', 'identity_access.service_capabilities' => ['identity_access.publish']]);
+        $service = new ServiceContext('test-publisher', $actor->workshopId, 'identity_access.publish');
+        $units->forService($service, function () use ($actor, &$executed): void {
+            $this->assertSame(0, func_num_args());
+            $this->assertSame($actor->workshopId, DB::connection('pgsql')->selectOne("SELECT current_setting('epr.workshop_id') AS workshop")->workshop);
+            $this->assertSame('test-publisher', DB::connection('pgsql')->selectOne("SELECT current_setting('epr.service_id') AS service")->service);
+            $executed[] = 'service';
+        });
+
+        $this->assertSame(['actor', 'service'], $executed);
+        foreach (['forActor', 'forService'] as $method) {
+            $this->assertSame('void', (string) (new ReflectionMethod(SqlUnit::class, $method))->getReturnType());
+        }
     }
 
     public function test_requires_the_actual_business_transaction_and_rejects_a_foreign_connection(): void
@@ -39,18 +67,22 @@ final class SqlUnitTest extends TestCase
         $units = app(SqlUnit::class);
         $first = $this->actor('atelier-1-manager');
         $second = $this->actor('atelier-2-staff');
-        $units->forActor($first, function ($connection) use ($units, $first) {
+        $units->forActor($first, function () use ($units, $first) {
+            $connection = DB::connection('pgsql');
             $units->assertActor($connection, $first);
             expect($connection->selectOne("SELECT current_setting('lock_timeout') AS lock, current_setting('statement_timeout') AS statement"))->toMatchObject(['lock' => '2s', 'statement' => '5s']);
             expect($connection->selectOne("SELECT current_setting('epr.workshop_id') AS workshop")->workshop)->toBe($first->workshopId);
         });
         try {
-            $units->forActor($first, fn ($connection) => $connection->select('SELECT 1/0'));
+            $units->forActor($first, function (): void {
+                DB::connection('pgsql')->select('SELECT 1/0');
+            });
             $this->fail('Expected SQL failure.');
         } catch (QueryException $error) {
             expect($error->errorInfo[0] ?? null)->toBe('22012');
         }
-        $units->forActor($second, function ($connection) use ($units, $second) {
+        $units->forActor($second, function () use ($units, $second) {
+            $connection = DB::connection('pgsql');
             $units->assertActor($connection, $second);
             expect($connection->selectOne("SELECT current_setting('epr.workshop_id') AS workshop")->workshop)->toBe($second->workshopId);
         });
@@ -71,8 +103,11 @@ final class SqlUnitTest extends TestCase
     {
         $units = app(SqlUnit::class);
         $first = $this->actor('atelier-1-manager');
-        $units->forActor($first, function ($connection) use ($units, $first) {
-            $units->forActor($first, fn ($nested) => expect($nested)->toBe($connection));
+        $units->forActor($first, function () use ($units, $first) {
+            $connection = DB::connection('pgsql');
+            $units->forActor($first, function () use ($connection): void {
+                expect(DB::connection('pgsql'))->toBe($connection);
+            });
             expect(fn () => $units->forActor($this->actor('atelier-2-manager'), fn () => null))->toThrow(LogicException::class);
         });
     }

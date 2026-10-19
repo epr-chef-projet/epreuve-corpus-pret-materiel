@@ -2,11 +2,8 @@
 
 declare(strict_types=1);
 
-namespace App\Shared\Database;
+namespace App\Modules\IdentityAccess\PublicApi;
 
-use App\Modules\IdentityAccess\PublicApi\ActorContext;
-use App\Modules\IdentityAccess\PublicApi\ResolveActor;
-use App\Modules\IdentityAccess\PublicApi\ServiceContext;
 use Closure;
 use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
@@ -17,37 +14,31 @@ final class SqlUnit
     public function __construct(private ResolveActor $actors) {}
 
     /**
-     * @template T
-     *
-     * @param  Closure(Connection): T  $work
-     * @return T
+     * @param  Closure(): void  $work
      */
-    public function forActor(ActorContext $actor, Closure $work): mixed
+    public function forActor(ActorContext $actor, Closure $work): void
     {
-        return DB::connection('pgsql')->transaction(function (Connection $connection) use ($actor, $work): mixed {
+        DB::connection('pgsql')->transaction(function (Connection $connection) use ($actor, $work): void {
             $this->establish($connection, $actor->workshopId, $actor->actorId, $actor->role, '', '');
             $this->actors->assertCurrent($actor);
 
-            return $work($connection);
+            $work();
         });
     }
 
     /**
-     * @template T
-     *
-     * @param  Closure(Connection): T  $work
-     * @return T
+     * @param  Closure(): void  $work
      */
-    public function forService(ServiceContext $service, Closure $work): mixed
+    public function forService(ServiceContext $service, Closure $work): void
     {
         if ($service->serviceId !== config('identity_access.service_id') || ! in_array($service->capability, config('identity_access.service_capabilities'), true)) {
             throw new LogicException('Service capability is not configured for this process.');
         }
 
-        return DB::connection('pgsql')->transaction(function (Connection $connection) use ($service, $work): mixed {
+        DB::connection('pgsql')->transaction(function (Connection $connection) use ($service, $work): void {
             $this->establish($connection, $service->workshopId, '', '', $service->serviceId, $service->capability);
 
-            return $work($connection);
+            $work();
         });
     }
 

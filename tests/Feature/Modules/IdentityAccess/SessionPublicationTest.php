@@ -8,7 +8,7 @@ use App\Modules\IdentityAccess\Access\UseCases\ManageSession\SessionRepository;
 use App\Modules\IdentityAccess\PublicApi\AdmitSessionPublication;
 use App\Modules\IdentityAccess\PublicApi\ResolveActor;
 use App\Modules\IdentityAccess\PublicApi\ServiceContext;
-use App\Shared\Database\SqlUnit;
+use App\Modules\IdentityAccess\PublicApi\SqlUnit;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -96,7 +96,9 @@ final class SessionPublicationTest extends TestCase
         $worker->setInput(hash_hmac('sha256', $sessionId, config('app.key')));
         $worker->setTimeout(15);
         try {
-            $route = app(SqlUnit::class)->forService($service, function ($connection) use ($worker, $user, $token, $service): ?array {
+            $route = null;
+            app(SqlUnit::class)->forService($service, function () use ($worker, $user, $token, $service, &$route): void {
+                $connection = DB::connection('pgsql');
                 app(SessionRepository::class)->lockCandidate($user['id'], 'borrower', $token);
                 $worker->start();
                 $deadline = microtime(true) + 8;
@@ -115,7 +117,7 @@ final class SessionPublicationTest extends TestCase
                 } while (microtime(true) < $deadline);
                 $this->assertTrue($blocked, 'Revocation did not wait for the publication row lock.');
 
-                return app(AdmitSessionPublication::class)->handle($service, $user['id'], 'borrower', $token);
+                $route = app(AdmitSessionPublication::class)->handle($service, $user['id'], 'borrower', $token);
             });
             $this->assertNotNull($route);
             $worker->wait();

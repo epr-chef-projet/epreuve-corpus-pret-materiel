@@ -2,6 +2,7 @@
 defineOptions({ name: 'AccessDashboardPage' });
 import { Head, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
+import { PendingCatalogOperations } from '@/modules/catalog/public/equipment';
 import { useI18n } from 'vue-i18n';
 const props = defineProps<{
     section?: 'catalog' | 'ownRequests' | 'teamRequests' | 'management';
@@ -25,29 +26,8 @@ const title = computed(() =>
     <section class="flex flex-col gap-4 p-4 sm:p-6">
         <Head :title="title" />
         <h1 class="text-2xl font-semibold">{{ title }}</h1>
-        <dl
-            v-if="page.props.auth.user"
-            class="flex flex-wrap gap-x-6 gap-y-3 rounded-md border p-4"
-        >
-            <div>
-                <dt class="text-sm text-muted-foreground">
-                    {{ t('identity.workshop') }}
-                </dt>
-                <dd>{{ page.props.auth.user.workshopName }}</dd>
-            </div>
-            <div>
-                <dt class="text-sm text-muted-foreground">
-                    {{ t('identity.account') }}
-                </dt>
-                <dd>{{ page.props.auth.user.displayName }}</dd>
-            </div>
-            <div>
-                <dt class="text-sm text-muted-foreground">
-                    {{ t('identity.role') }}
-                </dt>
-                <dd>{{ t('identity.' + page.props.auth.user.role) }}</dd>
-            </div>
-        </dl>
+
+        <PendingCatalogOperations />
         <section
             class="flex flex-col gap-3 rounded-lg border p-5"
             aria-labelledby="partial-title"

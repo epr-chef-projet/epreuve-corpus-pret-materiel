@@ -86,6 +86,13 @@ watch(
                         : 'common.stale',
                 )
             }}
+            <button
+                type="button"
+                class="ml-3 rounded-md border px-3 py-1"
+                @click="lifecycle?.resumeAccess()"
+            >
+                {{ t('common.refresh') }}
+            </button>
         </p>
     </div>
 </template>

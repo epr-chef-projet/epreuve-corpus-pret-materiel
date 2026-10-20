@@ -1,4 +1,8 @@
 import { createInertiaApp } from '@inertiajs/vue3';
+import {
+    catalogMessages,
+    installCatalogOperationCleanup,
+} from '@/modules/catalog/public/equipment';
 import { commonMessages } from '@/shared/i18n/messages';
 import {
     createPresentation,
@@ -27,12 +31,30 @@ const presentation = createPresentation({
     fr: {
         ...commonMessages.fr,
         ...identityMessages.fr,
-        issues: { ...commonMessages.fr.issues, ...identityMessages.fr.issues },
+        ...catalogMessages.fr,
+        issues: {
+            ...commonMessages.fr.issues,
+            ...identityMessages.fr.issues,
+            ...catalogMessages.fr.issues,
+            operations: {
+                ...commonMessages.fr.issues.operations,
+                ...catalogMessages.fr.issues.operations,
+            },
+        },
     },
     en: {
         ...commonMessages.en,
         ...identityMessages.en,
-        issues: { ...commonMessages.en.issues, ...identityMessages.en.issues },
+        ...catalogMessages.en,
+        issues: {
+            ...commonMessages.en.issues,
+            ...identityMessages.en.issues,
+            ...catalogMessages.en.issues,
+            operations: {
+                ...commonMessages.en.issues.operations,
+                ...catalogMessages.en.issues.operations,
+            },
+        },
     },
 });
 
@@ -57,6 +79,7 @@ void createInertiaApp({
         const echo = createEcho(page.props.reverb ?? null);
         app.provide(echoKey, echo);
         const access = useAccessStore();
+        const stopOperationCleanup = installCatalogOperationCleanup();
         const transport = echo ? installSessionTransport(echo, access) : null;
         app.provide(sessionSubscriptionsKey, transport?.subscriptions ?? null);
         const cleanToasts = watch(
@@ -74,6 +97,7 @@ void createInertiaApp({
             disconnect();
             transport?.dispose();
             cleanToasts();
+            stopOperationCleanup();
             disposeFlashToast();
             lifecycle.dispose();
             presentation.dispose();

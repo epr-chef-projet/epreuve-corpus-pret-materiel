@@ -1,13 +1,24 @@
 <script setup lang="ts">
 defineOptions({ name: 'PublicErrorPage' });
 import { computed } from 'vue';
-import { Head, Link } from '@inertiajs/vue3';
+import { PendingCatalogOperations } from '@/modules/catalog/public/equipment';
+import { useAccessStore } from '@/modules/identity-access/public/access';
+import { Head, Link, usePage } from '@inertiajs/vue3';
 import { useI18n } from 'vue-i18n';
 import LanguageSelector from '@/shared/i18n/LanguageSelector.vue';
 import { explainIssue } from '@/shared/i18n/issue';
 import { home, login } from '@/routes';
 const props = defineProps<{ issue: unknown }>();
 const composer = useI18n();
+const access = useAccessStore();
+const page = usePage();
+const mayVerify = computed(
+    () =>
+        access.status === 'active' &&
+        !access.confirming &&
+        !access.stale &&
+        access.matchesContext(page.props.auth),
+);
 const { t } = composer;
 const explanation = computed(() => explainIssue(props.issue, composer));
 </script>
@@ -27,6 +38,7 @@ const explanation = computed(() => explainIssue(props.issue, composer));
         <p v-if="explanation.correlationId" class="text-sm break-all">
             {{ t('common.correlation') }} : {{ explanation.correlationId }}
         </p>
+        <PendingCatalogOperations v-if="mayVerify" />
         <Link class="underline" :href="explanation.signIn ? login() : home()">{{
             t(explanation.signIn ? 'identity.signIn' : 'common.home')
         }}</Link>

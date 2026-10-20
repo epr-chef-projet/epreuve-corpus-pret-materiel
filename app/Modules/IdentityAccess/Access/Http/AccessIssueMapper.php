@@ -29,9 +29,21 @@ final class AccessIssueMapper
                 'Required' => 'validation.required',
                 'String' => 'validation.string',
                 'Max' => 'validation.max',
+                'Min' => 'validation.min',
+                'Integer' => 'validation.integer',
+                'Between' => 'validation.between',
+                'Uuid' => 'validation.uuid',
+                'Regex' => in_array($field, ['operationKey', 'equipmentId'], true) ? 'validation.uuid' : 'validation.text',
+                'NotRegex' => 'validation.text',
                 default => $request->routeIs('login.store') && $field === 'login' && $rule === null ? 'identity.credentials' : 'validation.unknown',
             };
             $parameters = $rule === 'Max' ? ['max' => (int) ($rules[$rule][0] ?? 0)] : [];
+            if ($rule === 'Min') {
+                $parameters = ['min' => (int) ($rules[$rule][0] ?? 0)];
+            }
+            if ($rule === 'Between') {
+                $parameters = ['min' => (int) ($rules[$rule][0] ?? 0), 'max' => (int) ($rules[$rule][1] ?? 0)];
+            }
             $fields[$field] = [new FieldErrorData($key, $parameters)];
         }
 
@@ -64,6 +76,9 @@ final class AccessIssueMapper
             default => ['operations.unexpected_failure', in_array($role, ['staff', 'manager'], true) ? 'contactManager' : 'contactStaff'],
         };
         $outcome = $status >= 500 && ! $request->isMethodSafe() ? 'unknown' : 'notApplied';
+        if ($outcome === 'unknown' && is_string($request->attributes->get('operationKey'))) {
+            $next = 'verifyOperation';
+        }
         $issue = new IssueData($code, [], $this->correlation($request), $outcome, new NextActionData($next));
         if ($request->expectsJson() && ! $request->header('X-Inertia')) {
             $result = response()->json(['issue' => $issue], $status);

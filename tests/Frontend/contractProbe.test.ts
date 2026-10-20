@@ -1,3 +1,11 @@
+import type { ManagementPageData } from '@/types/generated/types/App/Modules/Catalog/Equipment/UseCases/ReadEquipment';
+import catalog from './generated/catalog.json';
+import type {
+    EquipmentData,
+    EquipmentPage,
+    EquipmentQuery,
+} from '@/types/generated/types/App/Modules/Catalog/PublicApi';
+import type { OperationResultData } from '@/types/generated/types/App/Infrastructure/Operations';
 import { expect, expectTypeOf, it } from 'vitest';
 import serialized from './generated/sample.json';
 import identity from './generated/identity.json';
@@ -105,4 +113,86 @@ it('matches selected presentation, routing and notification JSON with their gene
     expect(presentation).toEqual(expected);
     expect(Array.isArray(presentation.issue.parameters)).toBe(false);
     expect(presentation.issue).not.toHaveProperty('fieldErrors');
+});
+
+it('matches real Catalog and Operations JSON with generated immutable contracts', () => {
+    const expected: {
+        equipment: EquipmentData;
+        page: EquipmentPage;
+        query: EquipmentQuery;
+        operation: OperationResultData;
+        managementPage: ManagementPageData;
+    } = {
+        equipment: {
+            equipmentId: '019a23d0-0000-7000-8000-000000000003',
+            name: 'Perceuse électricité',
+            description: null,
+            category: 'Outillage',
+            totalQuantity: 2,
+            status: 'active',
+            equipmentVersion: 1,
+            image: null,
+        },
+        page: {
+            items: [
+                {
+                    equipmentId: '019a23d0-0000-7000-8000-000000000003',
+                    name: 'Perceuse électricité',
+                    description: null,
+                    category: 'Outillage',
+                    totalQuantity: 2,
+                    status: 'active',
+                    equipmentVersion: 1,
+                    image: null,
+                },
+            ],
+            page: 1,
+            perPage: 25,
+            hasMore: false,
+            observedAt: '2026-10-20T15:30:00.000Z',
+        },
+        query: {
+            search: '%_',
+            category: 'Outillage',
+            page: 1,
+            perPage: 25,
+            audience: 'catalogManagement',
+        },
+        managementPage: {
+            items: [
+                {
+                    equipmentId: '019a23d0-0000-7000-8000-000000000003',
+                    name: 'Perceuse électricité',
+                    category: 'Outillage',
+                    totalQuantity: 2,
+                    status: 'active',
+                    equipmentVersion: 1,
+                    image: null,
+                },
+            ],
+            page: 1,
+            perPage: 25,
+            hasMore: false,
+            observedAt: '2026-10-20T15:30:00.000Z',
+        },
+        operation: {
+            status: 'applied',
+            receipt: {
+                operationKey: '019a23d0-0000-7000-8000-000000000003',
+                operationType: 'catalog.equipment.create',
+                resourceType: 'equipment',
+                resourceId: '019a23d0-0000-7000-8000-000000000003',
+                resultVersion: 1,
+                recordedAt: '2026-10-20T15:30:00.000Z',
+                replayed: false,
+            },
+        },
+    };
+    expect(catalog).toEqual(expected);
+    expectTypeOf<EquipmentData['status']>().toEqualTypeOf<
+        'active' | 'archived'
+    >();
+    expectTypeOf<OperationResultData['status']>().toEqualTypeOf<
+        'applied' | 'notEstablished'
+    >();
 });

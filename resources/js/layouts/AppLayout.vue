@@ -2,6 +2,7 @@
 import AppLayout from '@/layouts/app/AppSidebarLayout.vue';
 import {
     AccessBoundary,
+    CurrentAccount,
     SessionStatus,
 } from '@/modules/identity-access/public/access';
 import LanguageSelector from '@/shared/i18n/LanguageSelector.vue';
@@ -23,8 +24,9 @@ const { breadcrumbs = [] } = defineProps<{
                 >{{ t('common.skip') }}</a
             >
             <div
-                class="flex flex-wrap items-center justify-end gap-3 px-4 py-2"
+                class="flex flex-wrap items-center justify-between gap-3 px-4 py-2"
             >
+                <CurrentAccount />
                 <SessionStatus />
                 <LanguageSelector />
             </div>

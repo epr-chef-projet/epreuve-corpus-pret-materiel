@@ -1,5 +1,6 @@
 import { http } from '@inertiajs/core';
 import { context } from '@/routes/access';
+import { withRecoverySlot } from '@/shared/network/recoveryBudget';
 import type { SessionContextData } from '@/types/generated/types/App/Modules/IdentityAccess/Access/Data';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -45,12 +46,16 @@ export function isSessionContext(value: unknown): value is SessionContextData {
 export async function readContext(
     signal: AbortSignal,
 ): Promise<SessionContextData> {
-    const response = await http.getClient().request({
-        method: 'get',
-        url: context.url(),
-        headers: { Accept: 'application/json' },
+    const response = await withRecoverySlot(
+        () =>
+            http.getClient().request({
+                method: 'get',
+                url: context.url(),
+                headers: { Accept: 'application/json' },
+                signal,
+            }),
         signal,
-    });
+    );
     if (response.status === 401 || response.status === 419) {
         return {
             user: null,

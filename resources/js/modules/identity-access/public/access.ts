@@ -6,3 +6,4 @@ export { default as AccessBoundary } from '../access/components/AccessBoundary.v
 export { default as SessionStatus } from '../access/components/SessionStatus.vue';
 export { installSessionTransport } from '../access/notifications/transport';
 export { sessionSubscriptionsKey } from '../access/notifications/sessionSubscriptions';
+export { default as CurrentAccount } from '../access/components/CurrentAccount.vue';

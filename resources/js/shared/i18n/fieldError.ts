@@ -24,7 +24,14 @@ export function fieldError(
                 Object.keys(parameters).length === 0 ||
                 (first.messageKey === 'validation.max' &&
                     Object.keys(parameters).length === 1 &&
-                    Number.isInteger(parameters.max));
+                    Number.isSafeInteger(parameters.max)) ||
+                (first.messageKey === 'validation.min' &&
+                    Object.keys(parameters).length === 1 &&
+                    Number.isSafeInteger(parameters.min)) ||
+                (first.messageKey === 'validation.between' &&
+                    Object.keys(parameters).length === 2 &&
+                    Number.isSafeInteger(parameters.min) &&
+                    Number.isSafeInteger(parameters.max));
             if (valid) return composer.t(first.messageKey, parameters);
         }
     }

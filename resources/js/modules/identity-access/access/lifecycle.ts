@@ -1,5 +1,5 @@
 import { http, HttpCancelledError, HttpNetworkError } from '@inertiajs/core';
-import { router } from '@inertiajs/vue3';
+import { router, usePage } from '@inertiajs/vue3';
 import { watch } from 'vue';
 import type { Presentation } from '@/shared/i18n/presentation';
 import { isContextRequest, readContext } from './requests/readContext';
@@ -172,7 +172,10 @@ export function installAccessLifecycle(presentation: Presentation) {
         locked = false;
         access.allowResume();
         await verify(true);
-        if (access.context?.user)
+        if (
+            access.context?.user &&
+            !access.matchesContext(usePage().props?.auth)
+        )
             router.visit(window.location.href, { replace: true });
     }
     const before = router.on('beforeUpdate', (event) => {

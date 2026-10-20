@@ -55,6 +55,15 @@ return [
 
     'channels' => [
 
+        'catalog' => [
+            'name' => 'catalog',
+            'driver' => 'daily',
+            'path' => storage_path('logs/catalog.log'),
+            'days' => 14,
+            'level' => 'error',
+            'formatter' => JsonFormatter::class,
+        ],
+
         'identity' => [
             'name' => 'identity',
             'driver' => 'daily',

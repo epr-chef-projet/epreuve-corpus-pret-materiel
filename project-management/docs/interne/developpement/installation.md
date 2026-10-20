@@ -1,6 +1,6 @@
 # Installation et utilisation de la base
 
-**Version 0.11.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
+**Version 0.12.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
 
 Le projet comprend Laravel, Fortify, Inertia, Vue et les écrans d'authentification, avec les services retenus. Un clone reçoit les sources et leurs locks, sans nouvelle acquisition du kit. Les fonctionnalités et leurs contrats relèvent des [spécifications](../../cahiers-des-charges/fonctionnel/README.md) et des [contrats de modules](../architecture/contrats-et-lots.md).
 
@@ -101,6 +101,16 @@ scripts/bootstrap --instance a --add-auth-lookup
 
 Remplacer `a` par l'instance reçue. Le bootstrap vérifie l'ancienne configuration et conserve clé, secrets et données ; il crée le seul secret manquant, hors clone. La dernière commande utilise l'identité d'initialisation uniquement dans PostgreSQL : elle crée ou contrôle `epr_auth_lookup`, lui attribue son propre mot de passe et les seuls accès aux bases/schéma. Elle ne rejoue pas `roles.sql` ni `database.sql`, ne modifie aucun autre rôle et ne réinitialise pas le volume. Un rôle existant avec des privilèges inattendus provoque un refus. Une nouvelle installation reçoit directement les cinq secrets et le rôle.
 
+### Préparer la recherche Catalog
+
+Un volume neuf reçoit `pg_trgm` 1.6 dans le schéma `epr` pendant l’initialisation PostgreSQL, avant les migrations Catalog. Sur une installation existante, vérifier le projet Compose et les sauvegardes puis exécuter uniquement :
+
+```sh
+./vendor/bin/sail exec -T pgsql bash /opt/epr-postgres-bootstrap/provision-catalog-search.sh
+```
+
+Ce script utilise l’identité d’initialisation déjà réservée au conteneur PostgreSQL de l’installation. Il contrôle exclusivement `laravel` et `testing`, leur schéma propriétaire et l’absence de droit `CREATE` pour `epr_app`. Il installe seulement cette extension, ou vérifie une installation déjà conforme ; une version ou un schéma inattendu provoque un refus. Il ne rejoue pas les fichiers d’initialisation, ne change aucun rôle et ne reconstruit aucune donnée. Ne pas lui substituer le compte d’une autre installation. Préparer ensuite les migrations ordinaires avec l’identité migratrice ci-dessous.
+
 ### Migrer avec l’identité réservée
 
 Le service ponctuel `migrator`, dans le profil Compose `tools`, exécute les commandes Artisan officielles dans le runtime Sail de cette installation. Seul ce service reçoit le fichier secret migrateur. `config/database.php` le lit dans ce contexte réservé ; aucun mot de passe privilégié ne passe dans les arguments ni dans le service HTTP. Le cache de configuration de ce processus est dans son `/tmp`, distinct du cache partagé.
@@ -134,7 +144,7 @@ Le processus `horizon` de Compose reçoit explicitement `IDENTITY_SERVICE_ID=not
 
 IdentityAccess crée directement les trois tables `identity_access_workshops`, `identity_access_users` et `identity_access_auth_sessions`, chacune dans sa migration de `app/Modules/IdentityAccess/Database/Migrations/`. Une migration complémentaire installe leurs capacités PostgreSQL réservées. Les comptes portent directement UUID, login, atelier et rôle ; aucun compte du starter n'est conservé dans une table parallèle. Les droits applicatifs directs sur les trois tables sont révoqués dans leur transaction de création.
 
-`database/migrations/` conserve la création technique de `failed_jobs` : les tâches utilisent Redis mais leur fournisseur d'échecs écrit encore dans cette table. La table `migrations` est gérée par Laravel. Les tables SQL de sessions, cache, file et lots Laravel ne sont pas créées ; ces pilotes ne sont pas configurés par le projet. Les entrées applicatives inutilisées sont explicitement nulles quand le chargement Laravel fusionnerait sinon les configurations natives. Fortify reste limité à connexion/déconnexion ; les dépendances PHP qu'il requiert restent installées même lorsqu'une fonctionnalité optionnelle n'est pas exposée.
+`database/migrations/` conserve la création technique de `failed_jobs` : les tâches utilisent Redis mais leur fournisseur d'échecs écrit encore dans cette table. La table `migrations` est gérée par Laravel. `Catalog/Database/Migrations/` crée `catalog_equipment` : textes, total initial, état, version, dates, FK d’atelier, contraintes, index de tri/recherche et RLS forcée. Le runtime peut lire/insérer/modifier dans son contexte autorisé, sans suppression. `database/migrations/` crée aussi `operation_receipts`, propriété technique Operations : unicité de portée, empreinte, résultat minimal et FK composites d’acteur/référence. Le runtime peut lire et ajouter son reçu, sans modification ni suppression. Ces migrations sont additives ; une installation existante les reçoit par `migrate` sur ses deux bases, après la préparation de recherche, sans reconstruction ni nouveau semis. Les tables SQL de sessions, cache, file et lots Laravel ne sont pas créées ; ces pilotes ne sont pas configurés par le projet. Les entrées applicatives inutilisées sont explicitement nulles quand le chargement Laravel fusionnerait sinon les configurations natives. Fortify reste limité à connexion/déconnexion ; les dépendances PHP qu'il requiert restent installées même lorsqu'une fonctionnalité optionnelle n'est pas exposée.
 
 Une installation neuve suit `migrate`, puis la préparation explicite des comptes ci-dessous. Une mise à jour ordinaire utilise également `migrate` et préserve les données. Après consolidation des migrations initiales selon R05-017, une base existante ne s'aligne pas par le seul changement des fichiers : appliquer uniquement après autorisation la procédure de reconstruction suivante. Une conservation sans reconstruction exige une compatibilité vérifiée de sa structure et de son historique `migrations`.
 

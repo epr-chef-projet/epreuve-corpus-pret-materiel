@@ -181,6 +181,16 @@ export function createSessionSubscriptions(
         }
         disown = access.own(release);
         return {
+            settleRead() {
+                if (released || !current() || consumer.invalid) return false;
+                consumer.active = group.subscribed;
+                const messages = [...consumer.messages];
+                clear(consumer);
+                for (const entry of messages) {
+                    if (current()) consumer.onMessage(entry.value);
+                }
+                return true;
+            },
             capture() {
                 clear(consumer);
                 consumer.invalid = false;

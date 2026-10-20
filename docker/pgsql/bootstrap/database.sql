@@ -9,6 +9,7 @@ GRANT CONNECT ON DATABASE :"epr_database"
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 CREATE SCHEMA epr AUTHORIZATION epr_owner;
+CREATE EXTENSION pg_trgm WITH SCHEMA epr;
 REVOKE ALL ON SCHEMA epr FROM PUBLIC;
 GRANT USAGE ON SCHEMA epr TO epr_app, epr_backup, epr_auth_lookup;
 ALTER ROLE epr_auth_lookup IN DATABASE :"epr_database" SET lock_timeout = '2s';

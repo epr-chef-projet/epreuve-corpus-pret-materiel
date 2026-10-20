@@ -14,6 +14,30 @@ final class SqlUnit
     public function __construct(private ResolveActor $actors) {}
 
     /**
+     * Standalone reads own a short, read-only snapshot. Participants retain the outer unit.
+     *
+     * @param  Closure(): void  $work
+     */
+    public function forActorRead(ActorContext $actor, Closure $work): void
+    {
+        $connection = DB::connection('pgsql');
+        if ($connection->transactionLevel() > 0) {
+            $this->assertActor($connection, $actor);
+            $this->actors->assertCurrent($actor);
+            $work();
+
+            return;
+        }
+        $connection->transaction(function (Connection $connection) use ($actor, $work): void {
+            $connection->statement('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+            $this->establish($connection, $actor->workshopId, $actor->actorId, $actor->role, '', '');
+            $connection->select("SELECT set_config('transaction_timeout', '5s', true)");
+            $this->actors->assertCurrent($actor);
+            $work();
+        });
+    }
+
+    /**
      * @param  Closure(): void  $work
      */
     public function forActor(ActorContext $actor, Closure $work): void

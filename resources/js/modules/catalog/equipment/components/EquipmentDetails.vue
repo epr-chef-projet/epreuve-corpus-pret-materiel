@@ -10,6 +10,7 @@ import type { IssueData } from '@/types/generated/types/App/Shared/Errors';
 import { useCatalogProjection } from '../composables/useCatalogProjection';
 import { readEquipment } from '../requests/readEquipment';
 import EquipmentForm from './EquipmentForm.vue';
+import EquipmentReadStatus from './EquipmentReadStatus.vue';
 const props = defineProps<{
     initialEquipment: EquipmentData;
     receipt?: CommandReceipt | null;
@@ -30,12 +31,10 @@ const projection = useCatalogProjection(
         <Link class="underline" :href="manageCatalog()">{{
             t('catalog.back')
         }}</Link>
-        <p v-if="projection.busy.value" role="status">
-            {{ t('catalog.loading') }}
-        </p>
-        <p v-if="projection.stale.value" role="status">
-            {{ t('catalog.stale') }}
-        </p>
+        <EquipmentReadStatus
+            :stale="projection.stale.value"
+            :refreshing="projection.refreshing.value"
+        />
         <Button
             variant="outline"
             class="self-start"

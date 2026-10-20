@@ -4,29 +4,24 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\Equipment\Http;
 
-use App\Infrastructure\Operations\OperationScope;
-use App\Infrastructure\Operations\ReadOperationResult;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\EditEquipmentText\EditEquipmentTextAction;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\EquipmentQueryFactory;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\ManagementPageData;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\ReadEquipmentAction;
+use App\Modules\Catalog\Equipment\UseCases\ReadEquipmentOperation\ReadEquipmentOperationAction;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInputFactory;
 use App\Modules\Catalog\PublicApi\ReadEquipmentPage;
-use App\Modules\IdentityAccess\PublicApi\AuthorizeActor;
 use App\Modules\IdentityAccess\PublicApi\ResolveActor;
-use App\Modules\IdentityAccess\PublicApi\SqlUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 final class CatalogController
 {
-    public function __construct(private ResolveActor $actors, private AuthorizeActor $authorize) {}
+    public function __construct(private ResolveActor $actors) {}
 
     /** @return array<string, mixed> */
     private function messages(Request $request): array
@@ -47,9 +42,18 @@ final class CatalogController
         return Inertia::render('Manager/Catalog/Create', $this->messages($request));
     }
 
-    public function show(Request $request, string $equipment, EquipmentInputFactory $inputs, ReadEquipmentAction $read): Response
+    public function show(Request $request, string $equipment, EquipmentInputFactory $inputs, ReadEquipmentAction $read, ReadEquipmentOperationAction $operations): Response
     {
-        return Inertia::render('Manager/Catalog/Show', ['equipment' => $read->handle($this->actors->handle($request), $inputs->identifier($equipment)), ...$this->messages($request)]);
+        $actor = $this->actors->handle($request);
+        $value = $read->handle($actor, $inputs->identifier($equipment));
+        $messages = $this->messages($request);
+        if ($request->hasHeader('X-EPR-Operation-Key') || $request->hasHeader('X-EPR-Operation-Type')) {
+            $operation = $inputs->operation(['operationType' => $request->header('X-EPR-Operation-Type'), 'operationKey' => $request->header('X-EPR-Operation-Key')]);
+            $receipt = $operations->handle($actor, $operation['operationType'], $operation['operationKey'])->receipt;
+            $messages['commandReceipt'] = $receipt !== null && $receipt->resourceType === 'equipment' && $receipt->resourceId === $value->equipmentId ? $receipt : null;
+        }
+
+        return Inertia::render('Manager/Catalog/Show', ['equipment' => $value, ...$messages]);
     }
 
     public function store(Request $request, EquipmentInputFactory $inputs, CreateEquipmentAction $create): RedirectResponse
@@ -80,18 +84,10 @@ final class CatalogController
         return response()->json($read->handle($this->actors->handle($request), $inputs->identifier($equipment)), options: JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)->header('Cache-Control', 'private, no-store');
     }
 
-    public function operation(Request $request, ReadOperationResult $read, SqlUnit $units): JsonResponse
+    public function operation(Request $request, EquipmentInputFactory $inputs, ReadEquipmentOperationAction $read): JsonResponse
     {
-        $valid = Validator::make($request->query(), ['operationType' => ['required', 'in:'.CreateEquipmentAction::OPERATION.','.EditEquipmentTextAction::OPERATION], 'operationKey' => ['required', 'uuid', EquipmentInputFactory::UUID]])->validate();
-        if (array_diff(array_keys($request->query()), ['operationType', 'operationKey']) !== []) {
-            throw ValidationException::withMessages(['catalog' => __('catalog.validation.unknown_fields')]);
-        }
-        $actor = $this->actors->handle($request);
-        $this->authorize->handle($actor, 'manage-catalog');
-        $result = null;
-        $units->forActorRead($actor, function () use ($actor, $valid, $read, &$result): void {
-            $result = $read->handle(new OperationScope($actor->workshopId, $actor->actorId, $valid['operationType'], $valid['operationKey']));
-        });
+        $valid = $inputs->operation($request->query());
+        $result = $read->handle($this->actors->handle($request), $valid['operationType'], $valid['operationKey']);
 
         return response()->json($result)->header('Cache-Control', 'private, no-store');
     }

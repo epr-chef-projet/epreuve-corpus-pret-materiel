@@ -23,6 +23,8 @@ export const catalogMessages = {
             empty: 'Aucun matériel dans cet atelier.',
             noResults: 'Aucun matériel ne correspond à ces critères.',
             loading: 'Actualisation en cours…',
+            unverified: 'Informations à vérifier',
+            verified: 'Informations vérifiées',
             readFailed:
                 'La consultation a échoué. La dernière information connue est conservée.',
             retryRead: 'Actualiser',
@@ -103,6 +105,8 @@ export const catalogMessages = {
             empty: 'There is no equipment in this workshop.',
             noResults: 'No equipment matches these filters.',
             loading: 'Refreshing…',
+            unverified: 'Information awaiting verification',
+            verified: 'Verified information',
             readFailed:
                 'Reading failed. The last known information is retained.',
             retryRead: 'Refresh',

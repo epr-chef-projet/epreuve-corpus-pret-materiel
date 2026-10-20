@@ -5,6 +5,7 @@ import {
 } from '@/modules/identity-access/public/access';
 import type { NotificationEnvelopeData } from '@/types/generated/types/App/Shared/Realtime';
 import { isCatalogInvalidation, record } from '../contracts/decoders';
+import { useActivityIndicator } from './useActivityIndicator';
 
 export function useCatalogProjection<T>(
     initial: Ref<T>,
@@ -16,6 +17,7 @@ export function useCatalogProjection<T>(
     const generation = access.generation;
     const data = shallowRef<T>(initial.value);
     const busy = ref(false);
+    const activity = useActivityIndicator(busy);
     const stale = ref(true);
     const failed = ref(false);
     let disposed = false;
@@ -157,6 +159,7 @@ export function useCatalogProjection<T>(
     function dispose() {
         if (disposed) return;
         disposed = true;
+        activity.dispose();
         abort?.abort();
         clearTimeout(timer);
         clearTimeout(periodic);
@@ -179,6 +182,7 @@ export function useCatalogProjection<T>(
     return {
         data,
         busy,
+        refreshing: activity.visible,
         stale,
         failed,
         refresh: () => {

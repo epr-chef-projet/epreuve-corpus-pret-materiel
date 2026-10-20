@@ -24,8 +24,8 @@ const state = useEquipmentForm(
     toRef(props, 'receipt'),
 );
 const { form } = state;
-function applied(key: string) {
-    state.applied(key);
+function applied(key: string, receipt?: CommandReceipt) {
+    state.applied(key, receipt);
     emit('verified');
 }
 const explanation = computed(() =>
@@ -39,8 +39,15 @@ const explanation = computed(() =>
             {{ t('catalog.edit') }}
         </h2>
         <p>{{ t('catalog.required') }}</p>
-        <p v-if="state.saved.value" role="status">
-            {{ t(receipt?.replayed ? 'catalog.replayed' : 'catalog.saved') }}
+        <p class="grid text-sm" role="status">
+            <span
+                class="invisible col-start-1 row-start-1 before:content-[attr(data-sizing-text)]"
+                :data-sizing-text="t('catalog.saved')"
+                aria-hidden="true"
+            />
+            <span class="col-start-1 row-start-1">{{
+                state.saved.value ? t('catalog.saved') : ''
+            }}</span>
         </p>
         <div v-if="explanation" role="alert">
             <p>{{ explanation.message }}</p>
@@ -82,17 +89,19 @@ const explanation = computed(() =>
         </p>
         <form
             class="flex max-w-2xl flex-col gap-5"
+            :aria-busy="state.submitting.value"
             @submit.prevent="state.submit"
         >
             <fieldset
                 class="flex min-w-0 flex-col gap-5"
-                :disabled="form.processing || state.preparing.value"
+                :disabled="state.submitting.value"
             >
                 <div class="grid gap-2">
                     <Label for="equipment-name">{{ t('catalog.name') }} *</Label
                     ><Input
                         id="equipment-name"
                         v-model="form.name"
+                        class="disabled:opacity-100"
                         name="name"
                         required
                         maxlength="120"
@@ -109,6 +118,7 @@ const explanation = computed(() =>
                     ><Input
                         id="equipment-category"
                         v-model="form.category"
+                        class="disabled:opacity-100"
                         name="category"
                         required
                         maxlength="80"
@@ -143,6 +153,7 @@ const explanation = computed(() =>
                     ><Input
                         id="equipment-totalQuantity"
                         v-model="form.totalQuantity"
+                        class="disabled:opacity-100"
                         name="totalQuantity"
                         inputmode="numeric"
                         required
@@ -155,6 +166,11 @@ const explanation = computed(() =>
                 </div>
                 <Button
                     class="self-start"
+                    :class="{
+                        'disabled:opacity-100':
+                            state.submitting.value ||
+                            !state.pending.ready.value,
+                    }"
                     type="submit"
                     :disabled="
                         state.waiting.value ||
@@ -163,14 +179,13 @@ const explanation = computed(() =>
                         !state.pending.ready.value ||
                         state.pending.proofs.value.length >= 20
                     "
+                    ><span class="relative size-4" aria-hidden="true">
+                        <span
+                            v-if="state.saving.value"
+                            class="absolute inset-0 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none"
+                        /> </span
                     >{{
-                        t(
-                            form.processing || state.preparing.value
-                                ? 'catalog.saving'
-                                : equipment
-                                  ? 'catalog.save'
-                                  : 'catalog.createSubmit',
-                        )
+                        t(equipment ? 'catalog.save' : 'catalog.createSubmit')
                     }}</Button
                 >
             </fieldset>
@@ -181,10 +196,14 @@ const explanation = computed(() =>
         <p v-if="state.pending.proofs.value.length >= 20" role="status">
             {{ t('catalog.pendingLimit') }}
         </p>
-        <p v-if="state.uncertain.value" role="status">
-            {{ t('catalog.pending') }}
-        </p>
-        <PendingOperations @absent="state.absent" @applied="applied" />
+        <span class="sr-only" role="status">{{
+            state.saving.value ? t('catalog.saving') : ''
+        }}</span>
+        <PendingOperations
+            :receipt="receipt"
+            @absent="state.absent"
+            @applied="applied"
+        />
         <Button
             v-if="state.resumable.value"
             type="button"
@@ -193,7 +212,7 @@ const explanation = computed(() =>
             @click="state.resume"
             >{{ t('catalog.resume') }}</Button
         >
-        <p v-if="state.pending.proofs.value.length && !state.waiting.value">
+        <p v-if="state.pending.unresolved.value.length && !state.waiting.value">
             {{ t('catalog.cannotResume') }}
         </p>
     </section>

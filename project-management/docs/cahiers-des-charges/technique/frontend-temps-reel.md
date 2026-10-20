@@ -1,6 +1,6 @@
 # Frontend et synchronisation
 
-**Version 1.2 - spécification technique.** Ce chapitre possède les choix de présentation et de synchronisation. Le [fonctionnel](../fonctionnel/cadre-et-acces.md) possède les comportements ; les [contrats](../../interne/architecture/contrats-et-lots.md) possèdent champs, opérations et erreurs ; l'[environnement](../../interne/developpement/environnement.md) possède versions, adresses et secrets.
+**Version 1.3 - spécification technique.** Ce chapitre possède les choix de présentation et de synchronisation. Le [fonctionnel](../fonctionnel/cadre-et-acces.md) possède les comportements ; les [contrats](../../interne/architecture/contrats-et-lots.md) possèdent champs, opérations et erreurs ; l'[environnement](../../interne/developpement/environnement.md) possède versions, adresses et secrets.
 
 ## 1. Pages, état et représentations
 
@@ -15,7 +15,7 @@
 
 Le serveur livre les seules props autorisées : contexte, locale effective, données de l'écran et capacités d'action. Ces capacités aident l'affichage ; elles ne remplacent pas l'autorisation de la commande. Listes paginées : 25 éléments par défaut, au plus 100 ; tri/départage/filtering suivent le fonctionnel et les contrats de lecture, sans téléchargement de toutes les demandes pour filtrer en JavaScript.
 
-**EPR-T-061 - Propriété de l'état local.** Props serveur en lecture ; formulaire détaché, valeurs saisies, erreurs et `expectedVersion` chez le composable de l'usage. Aucune mise à jour externe ne remplace une saisie modifiée. Une donnée plus récente actualise la base consultable et signale la divergence ; l'enregistrement conserve la version ayant fondé la proposition jusqu'à relecture/résolution explicite.
+**EPR-T-061 - Propriété de l'état local.** Props serveur en lecture ; formulaire détaché, valeurs saisies, erreurs et `expectedVersion` chez le composable de l'usage. Aucune mise à jour externe ne remplace une saisie modifiée. Pendant l’envoi d’une commande, une nouvelle projection reste consultable ; son origine est rapprochée du reçu avant de déclarer un conflit. Le même reçu est consommé une seule fois. Une confirmation fondée sur une version déjà dépassée conserve la proposition et la version effectivement acquises jusqu’à résolution explicite. Une donnée plus récente actualise la base consultable et signale la divergence ; l'enregistrement conserve la version ayant fondé la proposition jusqu'à relecture/résolution explicite.
 
 Un store Pinia ciblé possède contexte d'accès, génération locale, état de connexion et consommateurs des abonnements partagés. Les formulaires et données métier ne sont pas placés dans un store universel. Un reset de ce store retire aussi requêtes/handlers/timers devenus étrangers. Les retours A → B → A reçoivent une nouvelle génération ; une réponse de l'ancienne génération est ignorée même si le compte est à nouveau identique.
 
@@ -26,6 +26,10 @@ Un store Pinia ciblé possède contexte d'accès, génération locale, état de 
 Les commandes JSON transportent `operationKey`, `expectedVersion` lorsqu'exigée et données de forme validée ; aucun atelier ou rôle reçu n'établit l'autorité. Les champs/status/mappings exacts appartiennent aux [contrats](../../interne/architecture/contrats-et-lots.md). Pending, confirmed, rejected et unknown sont distingués dans l'interface. Aucun changement optimiste de stock ou d'état du prêt n'est présenté comme acquis avant confirmation serveur.
 
 **EPR-T-063 - Résultat manquant et reprise.** Le navigateur conserve en mémoire le contenu de la commande encore pertinente. Pour permettre une interrogation après rechargement, `sessionStorage` peut garder uniquement une entrée bornée par opération en attente : compte/session/génération, clé, famille, ressource éventuelle, version attendue et empreinte de contenu ; pas les textes/quantités du formulaire, cookie, mot de passe ou diagnostic. Maximum 20 entrées, retirées après résultat constaté ou sortie du compte. Si la limite est atteinte, résoudre les opérations existantes avant un nouvel envoi.
+
+La confirmation Catalog est relue depuis le reçu durable à partir de la référence de visite décrite dans les [contrats HTTP](../../interne/architecture/contrats-et-lots.md#commandes). Une lecture automatique intermédiaire peut consommer un message temporaire de session ; elle ne retire pas cette preuve SQL. La lecture du reçu reste autorisée et bornée, sans rejouer la commande.
+
+La preuve conservée avant envoi et l’état de l’envoi ont des fonctions distinctes. L’état actif reste en mémoire, rattaché à la clé et au contexte courant ; le panneau de vérification présente les résultats réellement manquants et les preuves reprises après rechargement. Le reçu confirmé est rapproché avant cette présentation, y compris pendant une redirection ou l’initialisation d’un nouveau composant. La fin tardive de l’ancien envoi ne réintroduit pas une opération déjà confirmée.
 
 Après timeout/coupure, interroger l'opération par son entrée autorisée. Absence de preuve ne signifie pas rollback : suivre l'issue/suite du contrat, sans réémettre automatiquement une mutation avec une nouvelle clé. Une répétition explicitement admise reprend la même intention, clé et données comparables. Si le rechargement a perdu le contenu, ne pas le reconstruire approximativement pour renvoyer ; récupérer l'état et offrir la suite sûre prévue. Un échec du stockage navigateur laisse la commande utilisable en mémoire mais annonce la limite de reprise après rechargement.
 
@@ -59,6 +63,8 @@ Un coordinateur par usage regroupe les invalidations pendant 100 ms, avec dépar
 Récupération à ouverture, réabonnement, retour au premier plan et reprise réseau. Pendant que l'écran est visible, une lecture légère de la projection utile au moins toutes les 15 s couvre notamment le dernier signal perdu ; temporisations dispersées ±2 s. La [qualification](qualification.md) distingue transport normal et récupération après perte. En arrière-plan, arrêter les lectures périodiques ; au retour, afficher état non vérifié jusqu'à récupération.
 
 Après perte Reverb, indiquer dégradation et poursuivre les lectures autorisées bornées ; après perte HTTP, indiquer hors connexion et empêcher un envoi annoncé comme réussi. Trois tentatives de connexion espacées 1/2/5 s puis 15 s avec dispersion, sans réémettre les anciennes mutations. Une projection non revérifiée depuis 20 s reste affichable comme dernière information connue avec avertissement, jamais comme quantité garantie.
+
+Les lectures de vérification conservent la liste, la fiche ou le résultat vide déjà obtenu. Leur activité réseau et la validité des informations sont restituées séparément, dans un emplacement stable ; une vérification sans changement métier ne déplace pas les champs ou les commandes. Les confirmations d’enregistrement ont aussi leur emplacement réservé. Les indicateurs transitoires attendent 250 ms avant affichage et restent perceptibles au moins 300 ms une fois affichés ; cette temporisation concerne leur présentation, sans retarder le résultat, les erreurs, les protections des commandes ou le retrait immédiat d’un ancien contexte. Les annonces regroupent les états utiles et respectent la préférence de mouvement réduit.
 
 ## 4. Langues et sortie du contexte
 

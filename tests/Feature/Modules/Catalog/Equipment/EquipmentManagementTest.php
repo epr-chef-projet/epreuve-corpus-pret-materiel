@@ -6,12 +6,15 @@ namespace Tests\Feature\Modules\Catalog\Equipment;
 
 use App\Modules\Catalog\Database\Factories\EquipmentFactory;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
+use App\Modules\Catalog\Equipment\UseCases\ReadEquipmentOperation\ReadEquipmentOperationAction;
+use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInput;
 use App\Modules\Catalog\PublicApi\CatalogAudience;
 use App\Modules\Catalog\PublicApi\EquipmentQuery;
 use App\Modules\Catalog\PublicApi\ReadEquipmentBatch;
 use App\Modules\Catalog\PublicApi\ReadEquipmentPage;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -63,6 +66,64 @@ final class EquipmentManagementTest extends TestCase
         $this->assertDatabaseHas('catalog_equipment', ['id' => $receipt['resourceId'], 'workshop_id' => $actor->workshopId, 'name' => 'Perceuse %_ électrique', 'category' => 'Outillage', 'description' => 'Description française', 'total_quantity' => 2, 'is_active' => true, 'version' => 1]);
         $this->assertDatabaseHas('operation_receipts', ['operation_key' => $input['operationKey'], 'actor_id' => $actor->actorId, 'resource_id' => $receipt['resourceId']]);
         $this->get('/gestion/materiels/'.$receipt['resourceId'])->assertInertia(fn (Assert $page) => $page->component('Manager/Catalog/Show')->where('equipment.totalQuantity', 2)->where('equipment.image', null));
+    }
+
+    public function test_detail_resolves_its_own_durable_receipt_when_the_temporary_confirmation_is_gone(): void
+    {
+        $this->prepare();
+        $input = $this->input();
+        $this->post('/gestion/materiels', $input)->assertRedirect();
+        $receipt = json_decode(session('catalogReceipt'), true, flags: JSON_THROW_ON_ERROR);
+        session()->forget('catalogReceipt');
+        $this->withHeaders(['X-EPR-Operation-Key' => $input['operationKey'], 'X-EPR-Operation-Type' => CreateEquipmentAction::OPERATION])
+            ->get('/gestion/materiels/'.$receipt['resourceId'])
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Manager/Catalog/Show')->where('commandReceipt.operationKey', $input['operationKey'])->where('commandReceipt.resourceId', $receipt['resourceId'])->where('commandReceipt.resultVersion', 1));
+        $this->assertSame(1, DB::table('catalog_equipment')->where('id', $receipt['resourceId'])->count());
+        $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $input['operationKey'])->count());
+    }
+
+    public function test_a_confirmation_reference_cannot_confirm_another_equipment_or_another_workshops_operation(): void
+    {
+        $actor = $this->prepare();
+        $input = $this->input();
+        $this->post('/gestion/materiels', $input)->assertRedirect();
+        $receipt = json_decode(session('catalogReceipt'), true, flags: JSON_THROW_ON_ERROR);
+        $another = EquipmentFactory::new()->createOne(['workshop_id' => $actor->workshopId]);
+        $this->withHeaders(['X-EPR-Operation-Key' => $input['operationKey'], 'X-EPR-Operation-Type' => CreateEquipmentAction::OPERATION])
+            ->get('/gestion/materiels/'.$another->id)->assertOk()->assertInertia(fn (Assert $page) => $page->where('commandReceipt', null));
+        $this->withHeaders(['X-EPR-Operation-Key' => (string) Str::uuid7(), 'X-EPR-Operation-Type' => CreateEquipmentAction::OPERATION])
+            ->get('/gestion/materiels/'.$receipt['resourceId'])->assertOk()->assertInertia(fn (Assert $page) => $page->where('commandReceipt', null));
+        $foreign = Accounts::user('atelier-2-manager');
+        DB::select("SELECT set_config('epr.workshop_id', ?, true), set_config('epr.actor_id', ?, true), set_config('epr.actor_role','manager',true)", [$foreign['workshopId'], $foreign['id']]);
+        $foreignReceipt = app(CreateEquipmentAction::class)->handle(new ActorContext($foreign['id'], $foreign['workshopId'], $foreign['role']), new EquipmentInput('Foreign fixture', 'Synthetic', null), 0, (string) Str::uuid7());
+        DB::select("SELECT set_config('epr.workshop_id', ?, true), set_config('epr.actor_id', ?, true)", [$actor->workshopId, $actor->actorId]);
+        $this->withHeaders(['X-EPR-Operation-Key' => $foreignReceipt->operationKey, 'X-EPR-Operation-Type' => CreateEquipmentAction::OPERATION])
+            ->get('/gestion/materiels/'.$receipt['resourceId'])->assertOk()->assertInertia(fn (Assert $page) => $page->where('commandReceipt', null));
+        $this->get('/gestion/materiels/'.$foreignReceipt->resourceId)->assertNotFound();
+    }
+
+    public function test_operation_read_rechecks_the_manager_capability_without_relying_on_http(): void
+    {
+        $this->expectException(AuthorizationException::class);
+        app(ReadEquipmentOperationAction::class)->handle($this->actor('atelier-1-borrower-1'), CreateEquipmentAction::OPERATION, (string) Str::uuid7());
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function invalidConfirmationReferences(): iterable
+    {
+        yield 'unknown operation family' => ['lending.confirm', '019a0000-0000-7000-8000-000000000001'];
+        yield 'invalid operation identifier' => [CreateEquipmentAction::OPERATION, 'not-a-uuid'];
+        yield 'missing operation family' => ['', '019a0000-0000-7000-8000-000000000001'];
+    }
+
+    #[DataProvider('invalidConfirmationReferences')]
+    public function test_malformed_confirmation_headers_are_rejected(string $type, string $key): void
+    {
+        $actor = $this->prepare();
+        $equipment = EquipmentFactory::new()->createOne(['workshop_id' => $actor->workshopId]);
+        $this->withHeaders(['X-EPR-Operation-Key' => $key, 'X-EPR-Operation-Type' => $type])
+            ->getJson('/gestion/materiels/'.$equipment->id)->assertUnprocessable()->assertJsonPath('issue.errorCode', 'validation.invalid_input');
     }
 
     public function test_same_creation_is_replayed_but_changed_content_conflicts_without_disclosing_the_original(): void

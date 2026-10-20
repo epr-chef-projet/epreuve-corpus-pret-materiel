@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { ref, watch, onScopeDispose } from 'vue';
+import { computed, ref, watch, onScopeDispose } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Button } from '@/components/ui/button';
 import { show } from '@/routes/catalog';
@@ -10,9 +10,23 @@ import {
     type PendingProof,
 } from '../composables/usePendingOperations';
 import { readOperation } from '../requests/readEquipment';
-const emit = defineEmits<{ applied: [key: string]; absent: [key: string] }>();
+import { isReceipt } from '../contracts/decoders';
+import type { CommandReceipt } from '@/types/generated/types/App/Infrastructure/Operations';
+const props = defineProps<{ receipt?: CommandReceipt | null }>();
+const emit = defineEmits<{
+    applied: [key: string, receipt?: CommandReceipt];
+    absent: [key: string];
+}>();
 const { t } = useI18n();
 const pending = usePendingOperations();
+const unresolved = computed(() =>
+    pending.unresolved.value.filter(
+        (proof) =>
+            !isReceipt(props.receipt) ||
+            props.receipt.operationKey !== proof.operationKey ||
+            props.receipt.operationType !== proof.operationType,
+    ),
+);
 const access = useAccessStore();
 const statuses = ref<
     Record<string, 'checking' | 'absent' | 'failed' | 'applied'>
@@ -37,7 +51,7 @@ async function check(proof: PendingProof) {
             statuses.value[proof.operationKey] = 'applied';
             appliedLinks.value[proof.operationKey] = result.receipt.resourceId;
             pending.finish(result.receipt);
-            emit('applied', proof.operationKey);
+            emit('applied', proof.operationKey, result.receipt);
         } else {
             statuses.value[proof.operationKey] = 'absent';
             emit('absent', proof.operationKey);
@@ -63,7 +77,7 @@ onScopeDispose(() => controllers.forEach((controller) => controller.abort()));
 <template>
     <section
         v-if="
-            pending.proofs.value.length ||
+            unresolved.length ||
             Object.keys(appliedLinks).length ||
             pending.unavailable.value
         "
@@ -78,7 +92,7 @@ onScopeDispose(() => controllers.forEach((controller) => controller.abort()));
         </p>
         <ul class="flex flex-col gap-3">
             <li
-                v-for="proof in pending.proofs.value"
+                v-for="proof in unresolved"
                 :key="proof.operationKey"
                 class="flex flex-col items-start gap-2"
             >

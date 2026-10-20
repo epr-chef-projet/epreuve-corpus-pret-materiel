@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\Equipment\UseCases\SaveEquipment;
 
+use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
+use App\Modules\Catalog\Equipment\UseCases\EditEquipmentText\EditEquipmentTextAction;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -55,6 +57,19 @@ final class EquipmentInputFactory
         Validator::make(['equipmentId' => $id], ['equipmentId' => ['required', 'uuid', self::UUID]])->validate();
 
         return $id;
+    }
+
+    /** @param array<string, mixed> $data
+     * @return array{operationType: string, operationKey: string}
+     */
+    public function operation(array $data): array
+    {
+        if (array_diff(array_keys($data), ['operationType', 'operationKey']) !== []) {
+            throw ValidationException::withMessages(['catalog' => __('catalog.validation.unknown_fields')]);
+        }
+        $valid = Validator::make($data, ['operationType' => ['required', 'in:'.CreateEquipmentAction::OPERATION.','.EditEquipmentTextAction::OPERATION], 'operationKey' => ['required', 'uuid', self::UUID]])->validate();
+
+        return ['operationType' => $valid['operationType'], 'operationKey' => $valid['operationKey']];
     }
 
     /** @param array<string, mixed> $data

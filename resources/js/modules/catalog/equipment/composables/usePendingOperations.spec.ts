@@ -130,3 +130,107 @@ it('does not overwrite an in-memory proof with old storage when only writes fail
     expect(another.proofs.value).toHaveLength(1);
     expect(another.unavailable.value).toBe(true);
 });
+
+it('persists a sending proof without presenting it as unknown to another consumer', async () => {
+    const pending = await setup();
+    const key = crypto.randomUUID();
+    await pending.begin(
+        'catalog.equipment.create',
+        { operationKey: key },
+        null,
+        null,
+    );
+    const another = scope.run(() => usePendingOperations())!;
+    await vi.waitFor(() => expect(another.ready.value).toBe(true));
+    expect(another.proofs.value).toHaveLength(1);
+    expect(another.unresolved.value).toHaveLength(0);
+    expect(sessionStorage.getItem('epr.pendingCatalogOperations')).toContain(
+        key,
+    );
+    pending.endSending(key);
+    expect(another.unresolved.value.map((proof) => proof.operationKey)).toEqual(
+        [key],
+    );
+    pending.markSending(key);
+    expect(another.unresolved.value).toHaveLength(0);
+    pending.reject(key);
+    expect(another.proofs.value).toHaveLength(0);
+});
+
+it('releases an unfinished sending proof after its form has unmounted', async () => {
+    const pending = await setup();
+    const key = crypto.randomUUID();
+    await pending.begin(
+        'catalog.equipment.create',
+        { operationKey: key },
+        null,
+        null,
+    );
+    const next = effectScope();
+    try {
+        scope.stop();
+        const another = next.run(() => usePendingOperations())!;
+        await vi.waitFor(() => expect(another.ready.value).toBe(true));
+        expect(another.unresolved.value).toHaveLength(0);
+        pending.endSending(key);
+        expect(another.unresolved.value).toHaveLength(1);
+    } finally {
+        next.stop();
+    }
+});
+
+it('does not resurrect a confirmed operation when its old request finishes later', async () => {
+    const pending = await setup();
+    const key = crypto.randomUUID();
+    await pending.begin(
+        'catalog.equipment.create',
+        { operationKey: key },
+        null,
+        null,
+    );
+    pending.finish({
+        operationKey: key,
+        operationType: 'catalog.equipment.create',
+        resourceType: 'equipment',
+        resourceId: crypto.randomUUID(),
+        resultVersion: 1,
+        recordedAt: '2026-10-20T12:00:00.000Z',
+        replayed: false,
+    });
+    pending.endSending(key);
+    expect(pending.proofs.value).toEqual([]);
+    expect(pending.unresolved.value).toEqual([]);
+    expect(sessionStorage.getItem('epr.pendingCatalogOperations')).toBe('[]');
+});
+
+it('ignores a former generation finishing after another account starts an operation', async () => {
+    const pending = await setup();
+    const key = crypto.randomUUID();
+    const access = useAccessStore();
+    const context = access.context!;
+    await pending.begin(
+        'catalog.equipment.create',
+        { operationKey: key },
+        null,
+        null,
+    );
+    access.invalidate();
+    access.accept({
+        ...context,
+        authGeneration: 2,
+        broadcastToken: 'b'.repeat(64),
+    });
+    const another = scope.run(() => usePendingOperations())!;
+    await vi.waitFor(() => expect(another.ready.value).toBe(true));
+    await another.begin(
+        'catalog.equipment.create',
+        { operationKey: key },
+        null,
+        null,
+    );
+    pending.endSending(key);
+    expect(another.unresolved.value).toEqual([]);
+    expect(another.proofs.value).toHaveLength(1);
+    another.endSending(key);
+    expect(another.unresolved.value).toHaveLength(1);
+});

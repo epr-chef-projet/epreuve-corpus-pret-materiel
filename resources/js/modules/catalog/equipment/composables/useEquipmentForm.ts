@@ -16,6 +16,7 @@ import type { EquipmentData } from '@/types/generated/types/App/Modules/Catalog/
 import type { CommandReceipt } from '@/types/generated/types/App/Infrastructure/Operations';
 import { isReceipt } from '../contracts/decoders';
 import { usePendingOperations } from './usePendingOperations';
+import { useActivityIndicator } from './useActivityIndicator';
 
 type Body = Record<string, string | number | null>;
 export function useEquipmentForm(
@@ -44,13 +45,20 @@ export function useEquipmentForm(
     const saved = ref(false);
     const preparing = ref(false);
     const preparationFailed = ref(false);
-    const uncertain = ref(false);
+    const submitting = computed(() => form.processing || preparing.value);
+    const activity = useActivityIndicator(submitting);
     const resumable = ref(false);
-    const divergence = ref(false);
     let disposed = false;
     const intention = shallowRef<{ key: string; body: Body } | null>(null);
-    let observedVersion = equipment.value?.equipmentVersion;
+    let consumedReceipt: string | null = null;
     const current = () => !disposed && generation === access.generation;
+    const divergence = computed(
+        () =>
+            current() &&
+            !intention.value &&
+            equipment.value !== undefined &&
+            equipment.value.equipmentVersion > form.expectedVersion,
+    );
     const fields = () => ({
         name: form.name,
         category: form.category,
@@ -69,49 +77,74 @@ export function useEquipmentForm(
         form.totalQuantity = String(value.totalQuantity);
         form.defaults();
         form.clearErrors();
-        divergence.value = false;
     }
     function consumeReceipt(value: unknown) {
         if (!current() || !pending.ready.value || !isReceipt(value)) return;
+        if (value.operationKey === consumedReceipt) return;
+        if (equipment.value && value.resourceId !== equipment.value.equipmentId)
+            return;
         if (intention.value && intention.value.key !== value.operationKey)
             return;
-        const unchanged = intention.value
+        const sent = intention.value;
+        const unchanged = sent
             ? Object.entries(fields()).every(
-                  ([key, field]) => intention.value?.body[key] === field,
+                  ([key, field]) => sent.body[key] === field,
               )
             : !form.isDirty;
         pending.finish(value);
+        consumedReceipt = value.operationKey;
         saved.value = true;
-        uncertain.value = false;
         resumable.value = false;
         intention.value = null;
-        if (unchanged) loadCurrent();
+        if (unchanged) {
+            if (
+                sent &&
+                equipment.value &&
+                equipment.value.equipmentVersion !== value.resultVersion
+            ) {
+                form.expectedVersion = value.resultVersion;
+                form.defaults();
+            } else loadCurrent();
+        }
     }
     watch([receipt, pending.ready], ([value]) => consumeReceipt(value), {
         immediate: true,
     });
-    watch(equipment, (value) => {
-        if (!current() || !value || value.equipmentVersion === observedVersion)
-            return;
-        observedVersion = value.equipmentVersion;
-        if (form.isDirty || intention.value) divergence.value = true;
-        else loadCurrent();
-    });
-    function send() {
+    watch(equipment, (value, previous) => {
         if (
             !current() ||
-            !intention.value ||
-            access.status !== 'active' ||
-            access.stale
+            !value ||
+            value.equipmentVersion === previous?.equipmentVersion
         )
             return;
+        if (
+            !form.isDirty &&
+            !intention.value &&
+            value.equipmentVersion >= form.expectedVersion &&
+            (form.expectedVersion === previous?.equipmentVersion ||
+                form.expectedVersion === value.equipmentVersion)
+        )
+            loadCurrent();
+    });
+    function send() {
+        if (!current() || !intention.value) return;
         const key = intention.value.key;
+        if (access.status !== 'active' || access.stale) {
+            pending.endSending(key);
+            return;
+        }
         const body = { ...intention.value.body };
-        uncertain.value = false;
+        pending.markSending(key);
         resumable.value = false;
         saved.value = false;
         form.transform(() => body);
         const options = {
+            headers: {
+                'X-EPR-Operation-Key': key,
+                'X-EPR-Operation-Type': equipment.value
+                    ? 'catalog.equipment.update_text'
+                    : 'catalog.equipment.create',
+            },
             preserveScroll: true,
             onSuccess: (response: ReturnType<typeof usePage>) => {
                 if (current()) consumeReceipt(response.props.commandReceipt);
@@ -120,9 +153,9 @@ export function useEquipmentForm(
                 if (!current()) return;
                 pending.reject(key);
                 intention.value = null;
-                uncertain.value = false;
             },
             onFinish: () => {
+                pending.endSending(key);
                 if (current() && form.hasErrors)
                     void nextTick(() => {
                         if (!current()) return;
@@ -132,8 +165,6 @@ export function useEquipmentForm(
                             document.getElementById('equipment-form-feedback')
                         )?.focus();
                     });
-                if (current() && intention.value?.key === key)
-                    uncertain.value = true;
             },
         };
         if (equipment.value)
@@ -174,8 +205,8 @@ export function useEquipmentForm(
             send();
         } catch {
             if (current()) {
-                uncertain.value = false;
-                preparationFailed.value = true;
+                if (intention.value) pending.endSending(intention.value.key);
+                preparationFailed.value = intention.value === null;
             }
         } finally {
             if (current()) preparing.value = false;
@@ -184,10 +215,13 @@ export function useEquipmentForm(
     function absent(key: string) {
         if (intention.value?.key === key) resumable.value = true;
     }
-    function applied(key: string) {
+    function applied(key: string, receipt?: CommandReceipt) {
         if (intention.value?.key === key) {
+            if (isReceipt(receipt) && receipt.operationKey === key) {
+                consumeReceipt(receipt);
+                return;
+            }
             intention.value = null;
-            uncertain.value = false;
             saved.value = true;
         }
     }
@@ -195,9 +229,9 @@ export function useEquipmentForm(
         if (resumable.value) send();
     }
     const release = access.own(() => {
+        activity.dispose();
         intention.value = null;
         form.resetAndClearErrors();
-        uncertain.value = false;
     });
     onScopeDispose(() => {
         disposed = true;
@@ -227,7 +261,8 @@ export function useEquipmentForm(
         saved,
         preparing,
         preparationFailed,
-        uncertain,
+        submitting,
+        saving: activity.visible,
         resumable,
         divergence,
         error,

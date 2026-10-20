@@ -14,6 +14,7 @@ import type { EquipmentQuery } from '@/types/generated/types/App/Modules/Catalog
 import { useCatalogProjection } from '../composables/useCatalogProjection';
 import { readEquipmentPage } from '../requests/readEquipment';
 import PendingOperations from './PendingOperations.vue';
+import EquipmentReadStatus from './EquipmentReadStatus.vue';
 const props = defineProps<{
     initialPage: EquipmentPage;
     query: EquipmentQuery;
@@ -112,26 +113,17 @@ function clear() {
         <p v-if="page.props.errors.catalog" role="alert">
             {{ error('catalog') }}
         </p>
-        <p v-if="projection.busy.value" role="status">
-            {{ t('catalog.loading') }}
-        </p>
-        <p v-if="projection.stale.value" role="status">
-            {{ t('catalog.stale') }}
-        </p>
+        <EquipmentReadStatus
+            :stale="projection.stale.value"
+            :refreshing="projection.refreshing.value"
+        />
         <div v-if="projection.failed.value" role="alert">
             <p>{{ t('catalog.readFailed') }}</p>
             <Button variant="outline" @click="projection.refresh">{{
                 t('catalog.retryRead')
             }}</Button>
         </div>
-        <p
-            v-if="
-                rows.length === 0 &&
-                !projection.busy.value &&
-                !projection.failed.value
-            "
-            role="status"
-        >
+        <p v-if="rows.length === 0 && !projection.failed.value" role="status">
             {{
                 t(
                     query.search || query.category

@@ -1,4 +1,4 @@
-import { onScopeDispose, ref, shallowRef, watch } from 'vue';
+import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import {
     isReceipt,
@@ -19,9 +19,11 @@ export type PendingProof = {
 const storageKey = 'epr.pendingCatalogOperations';
 const changed = new EventTarget();
 const memoryByScope = new Map<string, PendingProof[]>();
+const sendingByScope = new Map<string, Set<string>>();
 let storageUnavailable = false;
 function clearPending() {
     memoryByScope.clear();
+    sendingByScope.clear();
     storageUnavailable = false;
     try {
         sessionStorage.removeItem(storageKey);
@@ -49,6 +51,12 @@ export function usePendingOperations() {
     const access = useAccessStore();
     const generation = access.generation;
     const proofs = shallowRef<PendingProof[]>([]);
+    const sending = shallowRef<string[]>([]);
+    const unresolved = computed(() =>
+        proofs.value.filter(
+            (proof) => !sending.value.includes(proof.operationKey),
+        ),
+    );
     const unavailable = ref(false);
     const ready = ref(false);
     let scope = '';
@@ -57,6 +65,7 @@ export function usePendingOperations() {
     const current = () => !disposed && generation === access.generation;
     function load() {
         if (!current() || !scope) return;
+        sending.value = [...(sendingByScope.get(scope) ?? [])];
         if (storageUnavailable) {
             unavailable.value = true;
             proofs.value = [...(memoryByScope.get(scope) ?? [])];
@@ -148,6 +157,7 @@ export function usePendingOperations() {
                 byte.toString(16).padStart(2, '0'),
             ).join(''),
         };
+        markSending(proof.operationKey);
         persist([
             ...proofs.value.filter(
                 (value) => value.operationKey !== proof.operationKey,
@@ -158,6 +168,7 @@ export function usePendingOperations() {
     }
     function finish(receipt: unknown) {
         if (!current() || !isReceipt(receipt)) return;
+        sendingByScope.get(scope)?.delete(receipt.operationKey);
         persist(
             proofs.value.filter(
                 (value) =>
@@ -167,16 +178,33 @@ export function usePendingOperations() {
         );
     }
     function reject(operationKey: string) {
-        if (current())
+        if (current()) {
+            sendingByScope.get(scope)?.delete(operationKey);
             persist(
                 proofs.value.filter(
                     (value) => value.operationKey !== operationKey,
                 ),
             );
+        }
+    }
+    function markSending(operationKey: string) {
+        if (!current()) return;
+        const keys = sendingByScope.get(scope) ?? new Set<string>();
+        keys.add(operationKey);
+        sendingByScope.set(scope, keys);
+        changed.dispatchEvent(new Event('changed'));
+    }
+    function endSending(operationKey: string) {
+        // Inertia finishes a successful visit after the previous form is unmounted.
+        if (generation !== access.generation) return;
+        sendingByScope.get(scope)?.delete(operationKey);
+        changed.dispatchEvent(new Event('changed'));
     }
     const clear = () => {
         memoryByScope.delete(scope);
+        sendingByScope.delete(scope);
         proofs.value = [];
+        sending.value = [];
         try {
             sessionStorage.removeItem(storageKey);
         } catch {
@@ -191,5 +219,15 @@ export function usePendingOperations() {
         changed.removeEventListener('changed', load);
     });
     void initialize();
-    return { proofs, unavailable, ready, begin, finish, reject };
+    return {
+        proofs,
+        unresolved,
+        unavailable,
+        ready,
+        begin,
+        finish,
+        reject,
+        markSending,
+        endSending,
+    };
 }

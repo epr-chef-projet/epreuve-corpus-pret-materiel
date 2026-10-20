@@ -1,6 +1,6 @@
 # Préparer GitHub, contribuer et recevoir la version commune
 
-**Version 1.3 - contenu validé ; parcours opérationnel à exercer.** Commandes et capacités examinées dans les sources officielles citées ; vérifier les outils, l'offre et les droits réellement disponibles avant application.
+**Version 1.4 - contenu validé ; parcours opérationnel à exercer.** Commandes et capacités examinées dans les sources officielles citées ; vérifier les outils, l'offre et les droits réellement disponibles avant application.
 
 **Résultat :** un dépôt identifiable, des accès et contrôles reçus, des contributions revues selon les responsabilités, puis une révision intégrée dont la CI est vérifiée. Ce parcours concerne les projets retenant GitHub et le circuit validation locale préalable → CI → intégration contrôlée. Il s'arrête à la version commune vérifiée ; image, registre et déploiement ont leurs procédures propres.
 
@@ -303,6 +303,8 @@ gh pr review "$GH_PR" --repo "$GH_REPO" --approve
 ```
 
 Pour **son propre changement**, le responsable suit la branche/PR et les contrôles prévus ; il ne tente pas de s'autoapprouver ni de créer un relecteur supérieur. Un avis indépendant reste possible. La dispense retenue s'utilise seulement par son mécanisme qualifié, sans enlever les gardes CI/intégrité.
+
+La fusion par squash regroupe les changements de la demande de fusion en un seul nouveau commit sur la branche cible. Elle conserve le résultat final de la contribution et l'historique antérieur de cette branche.
 
 Après décision et recontrôle, exemple de fusion **si squash est la méthode retenue** :
 

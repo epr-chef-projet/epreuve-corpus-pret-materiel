@@ -1,6 +1,6 @@
 # Organiser, partager et entretenir la documentation
 
-**Version 1.2 — contenu validé ; parcours de remise à exercer.** Commandes examinées dans les sources officielles citées ; vérifier leur compatibilité avec les outils du projet.
+**Version 1.3 - contenu validé ; parcours de remise à exercer.** Commandes examinées dans les sources officielles citées ; vérifier leur compatibilité avec les outils du projet.
 
 **Résultat :** un dépôt dont le README oriente vers des références actuelles, une documentation collective suffisante pour travailler et des procédures réservées transmises seulement aux personnes concernées. Le parcours s'applique à l'initialisation, aux contributions et à la remise d'un projet existant, avec ou sans agent.
 
@@ -91,6 +91,8 @@ Vérifier le parcours de lecture : accueil → installation/profil → spécific
 | Plans, cartographies, conversations, instructions et mandats privés, accords de travail, reprises, essais | Espace privé ignoré, exclu des images et archives partagées.                     |
 | Résultats et preuves d'exécution                                                                          | Outils et artefacts de validation autorisés ; conservation privée si nécessaire. |
 | Procédures réservées et secrets                                                                           | Stockage protégé ; transmission limitée aux personnes habilitées.                |
+
+Une méthode réutilisable et sa recette propre au projet ne sont pas privées par nature. Le guide commun décrit le parcours général ; la recette partagée précise les outils, noms de workflows, paramètres non secrets, commandes, origines des valeurs et résultats attendus pour le projet. Conserver une procédure dans un espace réservé dépend de ses destinataires et de la confidentialité de son contenu, pas du seul fait qu'elle concerne une publication ou qu'elle contient des détails propres au projet. Les secrets, journaux personnels et instructions d'intervention effectivement réservées gardent leurs protections et leur diffusion limitée.
 
 Un dossier ignoré n'est pas un contrôle d'accès aux fichiers du poste. Pour les procédures privées, recevoir emplacement, droits, sauvegarde privée et moyen de transmission autorisé. Le clone collectif reste utilisable sans ces fichiers ; une personne appelée à intervenir sur le déploiement reçoit séparément les accès et instructions nécessaires.
 

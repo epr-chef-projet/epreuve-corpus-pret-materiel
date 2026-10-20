@@ -1,6 +1,6 @@
-# Qualité et recette — prêt de matériel
+# Qualité et recette - prêt de matériel
 
-**Version 1.0.** La [qualification technique](../../cahiers-des-charges/technique/qualification.md) possède les objectifs et le lien aux exigences/scénarios fonctionnels ; ce document possède leurs profils d'exécution. Les résultats sont conservés dans les outils ou artefacts de validation, avec leurs références dans le suivi privé.
+**Version 1.1.** La [qualification technique](../../cahiers-des-charges/technique/qualification.md) possède les objectifs et le lien aux exigences/scénarios fonctionnels ; ce document possède leurs profils d'exécution. Les résultats sont conservés dans les outils ou artefacts de validation, avec leurs références dans le suivi privé.
 
 `./vendor/bin/sail composer ci:check` exécute les [contrôles des sources et des générés](installation.md#générés-et-contrôles-de-base). Les suites de tests et les parcours nécessaires sont sélectionnés selon les fonctionnalités concernées ; la disponibilité d'une suite ne prouve pas sa réception. Les exigences du profil applicable restent obligatoires.
 
@@ -8,7 +8,7 @@ Le développement courant utilise Vite/HMR. Le [démarrage](installation.md#4-tr
 
 <a id="ci-de-base"></a>
 
-## CI de base — portée et critères
+## CI de base - portée et critères
 
 Les [workflows de base](installation.md#7-exécution-de-la-base-en-ci) utilisent l'identifiant `local` dans leur reçu technique ; ils ne valident pas à eux seuls le profil complet de réception des fonctionnalités décrit ci-dessous. `base-pr` porte le SHA de fusion d'essai d'une PR vers `main` ou `qualification/p-epr-c-07` ; `base-main` porte le SHA réellement poussé sur l'une de ces deux branches. La branche de contrôle reste distincte de `main`. Aucun filtre de chemins n'omet les contrôles pour une contribution documentaire.
 
@@ -20,7 +20,7 @@ Le workflow commun construit et vérifie aussi l'image finale : scan, médias, c
 
 <a id="outils"></a>
 
-## EPR-Q-01 — Chaîne et portée
+## EPR-Q-01 - Chaîne et portée
 
 | Responsabilité                 | Outil/configuration                                                                                                                                                    |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -36,7 +36,7 @@ Versions compatibles à résoudre ensemble et verrouiller, pas installation des 
 
 <a id="commandes"></a>
 
-## EPR-Q-02 — Contrôles de base et profils futurs
+## EPR-Q-02 - Contrôles de base et profils futurs
 
 `./vendor/bin/sail composer ci:check` conserve onze contrôles : manifeste et plateforme Composer, Pint, PHPStan, concordance des générés, types, lint, format, build et audits Composer/npm. Cette chaîne contrôle la base sans exécuter les suites de tests ; celles-ci ont leurs commandes explicites. Les profils décrits ci-dessous demandent leur propre implémentation et vérification ; ne pas attribuer leur portée au seul résultat de cette commande.
 
@@ -58,7 +58,7 @@ En développement, les commandes PHP/npm passent par Sail ; en CI elles utilisen
 
 <a id="profils"></a>
 
-## EPR-Q-03 — Profils et contenu réellement vérifié
+## EPR-Q-03 - Profils et contenu réellement vérifié
 
 | Profil    | Entrée, preuves et limite                                                                                                                                                                                                   |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -70,7 +70,7 @@ Les raccordements réseau/SQL/job/fichiers/navigateur revendiqués utilisent leu
 
 <a id="isolation"></a>
 
-## EPR-Q-04 — Données et isolation des essais
+## EPR-Q-04 - Données et isolation des essais
 
 Les tests habituels utilisent l’installation existante du développeur : aucune deuxième copie ni nouvel ensemble de conteneurs n’est requis. La base PostgreSQL `testing` est réservée aux tests et préparée par les migrations du projet, sous l’identité migratrice selon l’[installation](installation.md#migrer-avec-lidentité-réservée). Les tests utilisent ensuite le rôle restreint `epr_app`, sans propriété du schéma ni droits DDL.
 
@@ -91,7 +91,7 @@ Les tests transactionnels existants conservent `DatabaseTransactions` : les fact
 
 Le test `QueueEffectTest` conserve une chaîne réelle Redis → Horizon → fichier privé. Il lance et arrête son processus Horizon dans le même runtime, avec bases Redis réservées `14` (file), `13` (cache), `12` (sessions), préfixe `epr_testing_` et files `testing-*`. Il observe le fichier écrit et son contenu déchiffré, puis retire uniquement sa sortie. Horizon local conserve ses ressources et ses files. Ces indices Redis sont réservés aux essais de cette installation ; aucun `FLUSHDB` ou `FLUSHALL` n’est requis.
 
-`composer test:contracts` prépare les seules fixtures générées du test frontend de sérialisation ; il ne prépare aucun compte ni base. Il sérialise aussi la projection réelle `AuthenticatedUserData`, comparée à son type généré et à son union fermée de rôles. Les tests Vitest utilisent jsdom et une suite vide reste un échec. Reprendre cette génération après changement des fixtures PHP.
+`composer test:contracts` prépare les seules fixtures générées du test frontend de sérialisation ; il ne prépare aucun compte ni base. Il sérialise aussi la projection réelle `AuthenticatedUserData`, comparée à son type généré et à son union fermée de rôles. Vitest découvre les tests locaux `resources/js/**/*.spec.ts` auprès de leur propriétaire et les essais transverses existants `tests/Frontend/**/*.test.ts`. Ils utilisent jsdom et une suite vide reste un échec. Reprendre cette génération après changement des fixtures PHP.
 
 ### Parcours navigateur
 
@@ -102,7 +102,7 @@ Installer une fois le navigateur correspondant au Playwright local verrouillé, 
 ./vendor/bin/sail npm run test:browser
 ```
 
-La commande compile un build distinct `public/browser-build/`, incluant la page de fixture sous `tests/Fixtures/` sans la déplacer dans les pages applicatives. Playwright maintient lui-même les commandes officielles `artisan serve` et `reverb:start` dans le conteneur applicatif, sur `127.0.0.1:8000` et `127.0.0.1:8081`. Ces ports doivent être libres ; un serveur déjà présent est refusé. Aucun service Docker supplémentaire n’est nécessaire. Les scénarios vérifient connexion réelle, événement privé Reverb et sécurité du QR, sans retries.
+La commande compile un build distinct `public/browser-build/`, incluant la page de fixture sous `tests/Fixtures/` sans la déplacer dans les pages applicatives. Playwright maintient lui-même les commandes officielles `artisan serve`, `reverb:start` et `horizon` dans le conteneur applicatif, sur `127.0.0.1:8000` et `127.0.0.1:8081`. Ces ports doivent être libres ; un serveur déjà présent est refusé. Aucun service Docker supplémentaire n’est nécessaire. Le processus Horizon de ce profil reçoit seul `IDENTITY_SERVICE_ID=browser-notifications` et `IDENTITY_SERVICE_CAPABILITIES=identity_access.publish` ; il consomme les files réservées `testing-*` et Redis de test. Sa confirmation de démarrage est attendue avant les scénarios. Les essais comprennent connexion réelle, langues, historique, autres onglets, réponse tardive, canal privé avec CSRF, partage des abonnements, traversée de la file notifications et sécurité du QR, sans retries. Une fixture avec barrière peut conserver volontairement un ancien socket : libérer sa publication après révocation et vérifier l'absence de son ancienne route dans les admissions, ainsi que l'absence de réception. D'autres sessions valables du même compte restent des destinataires légitimes. Les routes, jobs et pages de ces sources de test ne sont pas activés en production.
 
 Le profil de `tests/Browser/environment.ts` sélectionne `testing`, le rôle applicatif du clone, cookies et fichiers sous `storage/framework/browser/`, les seules ressources d’essai et des identifiants Reverb synthétiques. Le provider de fixture refuse une autre base ou un autre contexte. Les scénarios se connectent aux comptes synthétiques précréés de `testing` décrits par le reçu privé `identity-testing.json` ; aucun compte applicatif de `laravel` n'est utilisé. Ils n'obtiennent aucun privilège d'insertion/suppression de comptes. Les cookies, fichiers et sessions de navigateur restent propres à ce profil. Les serveurs sont arrêtés par Playwright même en échec. Les fichiers de résultats, builds et journaux d’essai restent ignorés et exclus du partage.
 
@@ -114,7 +114,7 @@ Fixtures synthétiques minimales et discriminantes pour deux ateliers ; profils 
 
 <a id="raccordements"></a>
 
-## EPR-Q-05 — Raccordements probants
+## EPR-Q-05 - Raccordements probants
 
 Les preuves accompagnent les fonctionnalités ou mécanismes concernés ; elles sont examinées lors de la réception des contributions.
 
@@ -128,7 +128,7 @@ Exercer aussi `/horizon` et les routes/API de logs, compteurs et jobs du package
 
 <a id="refus"></a>
 
-## EPR-Q-06 — Qualifier les contrôles et le circuit
+## EPR-Q-06 - Qualifier les contrôles et le circuit
 
 À la réception du dispositif de contrôle concerné, dans son lot approuvé, injecter un défaut représentatif pour chaque responsabilité : format PHP, erreur PHPStan, accès TS erroné dans un template Vue, avertissement ESLint, dérive générée/nouveau fichier, test échoué, build manquant et fichier distribué absent. Vérifier l'échec jusqu'au lanceur/gate ; retirer les défauts et reprendre les preuves concernées. Ne pas construire un test miroir du script comme seule preuve de son refus. Ce protocole s'applique au dispositif concerné, sans imposer des sondes anticipées aux mécanismes non introduits.
 
@@ -136,7 +136,7 @@ Exercer aussi bootstrap sans `vendor/`, plateforme/configuration manquante, cibl
 
 <a id="cout"></a>
 
-## EPR-Q-07 — Coût et fiabilité
+## EPR-Q-07 - Coût et fiabilité
 
 Objectifs proposés sur la machine de référence : contrôle court des frontières modifiées ≤ 30 s ; suite locale complète, hors bootstrap/téléchargement, ≤ 5 min ; `ci-pr` ≤ 10 min et construction/vérification `ci-main` ≤ 15 min. Déclarer durée de chaque phase, données, ressources et étendue. Ce sont des objectifs à mesurer, pas une permission de sauter un contrôle à l'échéance. Timeouts d'exécution proposés : 15 min pour `local`/`ci-pr`, 25 min pour `ci-main` ; tout dépassement échoue avec diagnostic.
 
@@ -146,7 +146,7 @@ Paralléliser seulement après isolation, avec agrégation bloquante. Clés de c
 
 <a id="preuves"></a>
 
-## EPR-Q-08 — Preuves et acceptation
+## EPR-Q-08 - Preuves et acceptation
 
 Conserver dans les outils et artefacts de validation prévus : SHA/état soumis, profil, versions/services, données/graines utiles, contrôles requis et résultats, nombre de cas utiles, temps, écarts et limites. Compléter le suivi privé si nécessaire, sans journal dans la documentation partagée. Rapports JSON/JUnit et sorties CI sont bornés, sans mots de passe, sessions, payloads privés ou captures brutes ; les résultats publics n'exigent pas de données personnelles. Recette humaine et exploration complètent les régressions sans les remplacer.
 

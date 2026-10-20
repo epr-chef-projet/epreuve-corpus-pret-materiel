@@ -33,7 +33,7 @@ final class Accounts
 
     public static function signIn(TestCase $test, string $login = 'atelier-1-borrower-1'): void
     {
-        $test->post('/login', ['login' => $login, 'password' => self::receipt()['password']])->assertRedirect('/dashboard');
+        $test->post('/login', ['login' => $login, 'password' => self::receipt()['password']])->assertRedirect(self::user($login)['role'] === 'borrower' ? '/catalogue' : '/demandes');
         $test->withCookie(config('session.cookie'), session()->getId());
     }
 }

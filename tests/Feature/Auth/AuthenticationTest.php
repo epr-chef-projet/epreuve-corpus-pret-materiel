@@ -83,7 +83,7 @@ class AuthenticationTest extends TestCase
 
     public function test_precreated_users_authenticate_by_normalized_login(): void
     {
-        $this->post('/login', ['login' => ' ATELIER-1-BORROWER-1 ', 'password' => Accounts::receipt()['password']])->assertRedirect('/dashboard');
+        $this->post('/login', ['login' => ' ATELIER-1-BORROWER-1 ', 'password' => Accounts::receipt()['password']])->assertRedirect('/catalogue');
         $this->withCookie(config('session.cookie'), session()->getId());
         $this->assertAuthenticated();
         $this->get('/dashboard')->assertOk()->assertHeader('Cache-Control', 'no-store, private');

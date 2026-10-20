@@ -52,6 +52,9 @@ export default defineConfig(({ mode }) => {
                                 if (name === '_foundation/Probe') {
                                     return import('/tests/Fixtures/pages/Probe.vue');
                                 }
+                                if (name === '_foundation/SessionProbe') {
+                                    return import('/tests/Fixtures/pages/SessionProbe.vue');
+                                }
                                 const pages = import.meta.glob('/resources/js/pages/**/*.vue');
                                 const page = pages['/resources/js/pages/' + name + '.vue'];
                                 if (!page) throw new Error('Page not found: ' + name);

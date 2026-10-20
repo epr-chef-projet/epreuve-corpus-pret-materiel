@@ -2,7 +2,7 @@
 
 Application pour deux ateliers indépendants : catalogue de matériel, demandes multiarticles, réservation des quantités, prêts et bordereaux PDF privés. Le [cahier des charges fonctionnel](project-management/docs/cahiers-des-charges/fonctionnel/README.md) définit les comportements attendus.
 
-La base Laravel, Vue/TypeScript et Inertia utilise Docker/Sail avec PostgreSQL, Redis, Horizon, Reverb et Mailpit. Les comptes précréés se connectent par identifiant, avec leur atelier, leur rôle et une session limitée à deux heures. Le tableau de bord indique les fonctions encore indisponibles : cadre complet FR/EN, catalogue et prêts.
+La base Laravel, Vue/TypeScript et Inertia utilise Docker/Sail avec PostgreSQL, Redis, Horizon, Reverb et Mailpit. Les comptes précréés se connectent par identifiant, avec leur atelier, leur rôle et une session limitée à deux heures. Le cadre des écrans est disponible en français et anglais, avec une navigation adaptée au rôle et une protection des écrans lors des changements de session. Les destinations Catalogue, demandes et gestion annoncent leurs fonctions encore indisponibles ; elles ne présentent aucune quantité ou demande fictive.
 
 ## Installer
 

@@ -20,6 +20,7 @@ declare module '@inertiajs/core' {
             auth: Auth;
             sidebarOpen: boolean;
             reverb: ReverbPublicConfig | null;
+            locale: 'fr' | 'en';
             [key: string]: unknown;
         };
     }

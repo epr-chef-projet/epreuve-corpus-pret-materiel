@@ -2,6 +2,11 @@ import { mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import PasswordFocusFixture from './fixtures/PasswordFocusFixture.vue';
 import { focus } from '@/shared/directives/focus';
+import { createI18n } from 'vue-i18n';
+import { commonMessages } from '@/shared/i18n/messages';
+
+const i18n = () =>
+    createI18n({ legacy: false, locale: 'en', messages: commonMessages });
 
 describe('password input public focus and visibility', () => {
     const wrappers: Array<ReturnType<typeof mount>> = [];
@@ -12,7 +17,7 @@ describe('password input public focus and visibility', () => {
     it('focuses the native field through the typed public handle', async () => {
         const wrapper = mount(PasswordFocusFixture, {
             attachTo: document.body,
-            global: { directives: { focus } },
+            global: { directives: { focus }, plugins: [i18n()] },
         });
         wrappers.push(wrapper);
         await wrapper.get('[data-test="focus-password"]').trigger('click');
@@ -24,7 +29,7 @@ describe('password input public focus and visibility', () => {
 
     it('keeps the value and label while toggling visibility', async () => {
         const wrapper = mount(PasswordFocusFixture, {
-            global: { directives: { focus } },
+            global: { directives: { focus }, plugins: [i18n()] },
         });
         wrappers.push(wrapper);
         const field = wrapper.get<HTMLInputElement>('input');

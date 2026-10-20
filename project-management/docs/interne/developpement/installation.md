@@ -1,6 +1,6 @@
 # Installation et utilisation de la base
 
-**Version 0.10.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
+**Version 0.11.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
 
 Le projet comprend Laravel, Fortify, Inertia, Vue et les écrans d'authentification, avec les services retenus. Un clone reçoit les sources et leurs locks, sans nouvelle acquisition du kit. Les fonctionnalités et leurs contrats relèvent des [spécifications](../../cahiers-des-charges/fonctionnel/README.md) et des [contrats de modules](../architecture/contrats-et-lots.md).
 
@@ -126,7 +126,9 @@ Attendus : session `epr_migrator`, rôle effectif `epr_owner`, base choisie, sch
 if (DB::select("select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_roles r on r.oid=c.relowner where n.nspname=? and c.relkind in (?,?,?,?,?) and r.rolname <> ?", ["epr", "r", "p", "S", "v", "m", "epr_owner"])) { throw new RuntimeException("Unexpected SQL object owner"); }'
 ```
 
-Attendus : migrations appliquées ou aucune migration en attente, objets possédés par `epr_owner`. Exécuter cette séquence pour chacune des deux bases à l’installation, puis seulement lorsque les migrations changent. Elle ne fait ni reset ni semis. Les tests emploient ensuite `epr_app`, sans droits DDL ; les tests transactionnels ne relancent pas les migrations.
+Attendus : migrations appliquées ou aucune migration en attente, objets possédés par `epr_owner`. Exécuter cette séquence pour chacune des deux bases à l’installation, puis seulement lorsque les migrations changent. Elle ne fait ni reset ni semis. Les tests emploient ensuite `epr_app`, sans droits DDL ; les tests transactionnels ne relancent pas les migrations. La migration additive de routage des sessions crée uniquement un index et une fonction étroite IdentityAccess ; elle ne reconstruit ni table ni compte. Une copie déjà préparée reprend les migrations ordinaires sur chacune de ses deux bases autorisées, sans migrate:fresh ni semis implicite.
+
+Le processus `horizon` de Compose reçoit explicitement `IDENTITY_SERVICE_ID=notifications` et `IDENTITY_SERVICE_CAPABILITIES=identity_access.publish` pour le routage des notifications. Conserver ces paramètres dans l'environnement de ce seul processus ; ne pas les ajouter au `.env` commun ni à l'image. Un autre hébergement doit appliquer la même séparation. Après changement de ce bloc ou du code des workers, renouveler le service existant avec la recette de mise à jour et vérifier `horizon:status` ; un worker déjà démarré ne charge pas automatiquement le nouveau code.
 
 ### Structure créée par les migrations
 

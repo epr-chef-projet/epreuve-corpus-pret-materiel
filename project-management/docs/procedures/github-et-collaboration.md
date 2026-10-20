@@ -1,6 +1,6 @@
 # Préparer GitHub, contribuer et recevoir la version commune
 
-**Version 1.2 — contenu validé ; parcours opérationnel à exercer.** Commandes et capacités examinées dans les sources officielles citées ; vérifier les outils, l'offre et les droits réellement disponibles avant application.
+**Version 1.3 - contenu validé ; parcours opérationnel à exercer.** Commandes et capacités examinées dans les sources officielles citées ; vérifier les outils, l'offre et les droits réellement disponibles avant application.
 
 **Résultat :** un dépôt identifiable, des accès et contrôles reçus, des contributions revues selon les responsabilités, puis une révision intégrée dont la CI est vérifiée. Ce parcours concerne les projets retenant GitHub et le circuit validation locale préalable → CI → intégration contrôlée. Il s'arrête à la version commune vérifiée ; image, registre et déploiement ont leurs procédures propres.
 
@@ -169,6 +169,10 @@ Les PR non fiables ne reçoivent pas les credentials de publication ou de produc
 Identifier les opérations et droits qui diffèrent entre une PR, une intégration et un lancement manuel. Exercer les opérations propres à chaque parcours dans un périmètre de qualification hors production, avec leurs conditions et permissions effectives. Une PR réussie ne prouve pas le fonctionnement d'une étape exécutée uniquement après intégration. Ne pas accorder à une PR l'écriture dans un cache partagé ou l'accès à des credentials réservés pour contourner cette différence.
 
 Pour chaque cache retenu, vérifier sa première création, sa restauration et le repli après absence ou indisponibilité. Les clés, le rafraîchissement et les droits doivent empêcher la réutilisation d'un contenu incompatible ou non autorisé ; secrets, configurations privées, données et résultats de contrôle restent exclus. Un cache inutilisable entraîne la préparation normale, sans neutraliser un échec de construction, de test ou de contrôle. Ne pas considérer un résultat de contrôle conservé comme une nouvelle exécution.
+
+Éprouver aussi les transitions susceptibles d’invalider les caches : changement de jour si la recette prévoit un rafraîchissement, et modification des fichiers de verrouillage. Vérifier que les parties compatibles restent réutilisées, que les mises à jour requises sont exécutées et que les dépendances sont installées conformément aux nouveaux verrous. Une restauration compatible peut provenir d’une autre clé ; vérifier son contenu sans la confondre avec une correspondance exacte.
+
+Distinguer la preuve de restauration et de fonctionnement de la mesure du gain. Une différence de versions peut empêcher une comparaison chronométrique contrôlée sans interdire de vérifier la réutilisation effective et la réussite des contrôles. Déclarer séparément les scénarios réellement éprouvés et ceux restant à qualifier.
 
 Comparer une exécution sans restauration de cache et une exécution avec cache à révision identique, avec paramètres, outils, fraîcheur des sources et conditions d'exécution comparables. Inclure restauration, validation des contenus, construction, enregistrement et transferts dans la durée totale, ainsi que le stockage consommé. Conserver les caches dont le gain net justifie le coût et la maintenance ; aucun cache d'outil ni rythme de rafraîchissement n'est imposé par principe. Conserver les mesures et leurs limites dans les outils et artefacts de validation prévus, ou dans le suivi privé ; la recette partagée décrit le fonctionnement retenu.
 

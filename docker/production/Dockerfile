@@ -5,10 +5,8 @@ FROM cgr.dev/chainguard/php@sha256:c6714e4394e5fddbf700596f1100e24a9fd8b66239817
 FROM cgr.dev/chainguard/wolfi-base@sha256:030e45cb37187dff322bbefe9658bcaec31b824a5d523380771a64864c9f45d4 AS apk-assembly
 USER root
 COPY --from=base / /base-root
-COPY --from=php-packages / /epr-php-packages/
-RUN cp /epr-php-packages/build-signing.rsa.pub /base-root/etc/apk/keys/build-signing.rsa.pub \
-    && php_upgrades="$(awk -F: '$1 == "P" && $2 ~ /^php-8[.]5($|-)/ && $2 !~ /^php-8[.]5-(redis|imagick|igbinary)($|-)/ { print $2 "=8.5.12-r0" }' /base-root/lib/apk/db/installed)" \
-    && apk add --no-cache --no-scripts --root /base-root --repository /epr-php-packages $php_upgrades \
+RUN php_upgrades="$(awk -F: '$1 == "P" && $2 ~ /^php-8[.]5($|-)/ && $2 !~ /^php-8[.]5-(redis|imagick|igbinary)($|-)/ { print $2 "=8.5.12-r0" }' /base-root/lib/apk/db/installed)" \
+    && apk add --no-cache --no-scripts --root /base-root $php_upgrades \
       php-8.5=8.5.12-r0 php-8.5-fpm=8.5.12-r0 \
       php-8.5-bcmath=8.5.12-r0 php-8.5-exif=8.5.12-r0 php-8.5-fileinfo=8.5.12-r0 \
       php-8.5-intl=8.5.12-r0 php-8.5-mbstring=8.5.12-r0 php-8.5-pcntl=8.5.12-r0 \
@@ -21,7 +19,6 @@ RUN cp /epr-php-packages/build-signing.rsa.pub /base-root/etc/apk/keys/build-sig
       nginx-mainline-scgi-params=1.31.6-r3 nginx-mainline-uwsgi-params=1.31.6-r3 \
       busybox=1.38.0-r3 curl=8.23.0-r1 libcurl-openssl4=8.23.0-r1 \
       ca-certificates=20260909-r3 ca-certificates-bundle=20260909-r3 \
-    && rm /base-root/etc/apk/keys/build-signing.rsa.pub \
     && ldconfig -r /base-root \
     && chroot /base-root /usr/bin/busybox --install -s /usr/bin
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Infrastructure\Http\Presentation\SetPresentationLocale;
+use App\Infrastructure\Http\Session\ReadOnlySession;
 use App\Modules\IdentityAccess\Access\Http\ResolveSession;
 use App\Modules\IdentityAccess\Access\Http\ShareIdentity;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
@@ -13,6 +14,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -23,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->prependToPriorityList(StartSession::class, ReadOnlySession::class);
         $middleware->prependToPriorityList(AuthenticatesRequests::class, ResolveSession::class);
         $middleware->append(SetPresentationLocale::class);
         $middleware->encryptCookies(except: ['sidebar_state']);

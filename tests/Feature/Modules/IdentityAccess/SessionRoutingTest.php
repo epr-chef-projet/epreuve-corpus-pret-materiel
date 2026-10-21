@@ -80,15 +80,31 @@ final class SessionRoutingTest extends TestCase
         $read->handle($this->service('atelier-2-manager'), [Role::Borrower], $actor, $first->nextCursor, 1);
     }
 
+    private function candidateIsListed(string $token): bool
+    {
+        $cursor = null;
+        $seen = [];
+        do {
+            $page = app(ReadSessionCandidates::class)->handle($this->service(), [Role::Manager], Accounts::user('atelier-1-manager')['id'], $cursor);
+            if (in_array($token, array_map(fn ($candidate) => $candidate->broadcastToken, $page->candidates), true)) {
+                return true;
+            }
+            $cursor = $page->nextCursor;
+            if ($cursor !== null) {
+                $this->assertNotContains($cursor, $seen);
+                $seen[] = $cursor;
+            }
+        } while ($cursor !== null);
+
+        return false;
+    }
+
     public function test_revocation_removes_our_candidate_and_candidate_listing_is_not_an_admission(): void
     {
         $token = $this->createCandidate('atelier-1-manager');
-        $read = app(ReadSessionCandidates::class);
-        $page = $read->handle($this->service(), [Role::Manager], Accounts::user('atelier-1-manager')['id']);
-        $this->assertContains($token, array_map(fn ($candidate) => $candidate->broadcastToken, $page->candidates));
+        $this->assertTrue($this->candidateIsListed($token));
         app(SessionRepository::class)->revoke($this->sessionIds[0]);
-        $page = $read->handle($this->service(), [Role::Manager], Accounts::user('atelier-1-manager')['id']);
-        $this->assertNotContains($token, array_map(fn ($candidate) => $candidate->broadcastToken, $page->candidates));
+        $this->assertFalse($this->candidateIsListed($token));
     }
 
     public function test_no_routing_is_available_without_a_service_context_or_to_the_authentication_sql_identity(): void

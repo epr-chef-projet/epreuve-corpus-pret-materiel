@@ -916,12 +916,50 @@ test('a real queued invalidation refreshes another browser without replacing its
                 exact: false,
             }),
         ).toBeVisible();
+        for (const path of [
+            '/gestion/materiels/lectures',
+            '/access/context',
+            url + '/lecture',
+        ]) {
+            const read = await other.request.get(path);
+            expect(read.status()).toBe(200);
+            expect(Boolean(read.headers()['set-cookie'])).toBe(false);
+        }
+        let rejectedRequests = 0;
+        await other.route(url, async (route) => {
+            if (route.request().method() !== 'PATCH') return route.continue();
+            const body: unknown = route.request().postDataJSON();
+            expect(body).toMatchObject({ expectedVersion: 1 });
+            const response = await route.fetch({ maxRedirects: 0 });
+            expect(response.status()).toBe(303);
+            expect(response.headers().location).toBe(url);
+            rejectedRequests++;
+            for (const path of [
+                '/gestion/materiels/lectures',
+                '/access/context',
+                '/gestion/materiels/operations?operationType=catalog.equipment.update_text&operationKey=' +
+                    randomUUID(),
+            ]) {
+                const read = await other.request.get(path);
+                expect(read.status()).toBe(200);
+                expect(Boolean(read.headers()['set-cookie'])).toBe(false);
+            }
+            await route.fulfill({ response });
+        });
         await other
             .getByRole('button', {
                 name: 'Enregistrer les textes',
                 exact: true,
             })
             .click();
+        await expect.poll(() => rejectedRequests).toBe(1);
+        const stored: unknown = await (
+            await other.request.get(url + '/lecture')
+        ).json();
+        expect(stored).toMatchObject({
+            name: name + ' elsewhere',
+            equipmentVersion: 2,
+        });
         await expect(
             other
                 .getByRole('alert')
@@ -1172,6 +1210,18 @@ test('mobile validation remains understandable after a language change and forei
     await page
         .getByRole('link', { name: 'Créer un matériel', exact: true })
         .click();
+    await page.route('**/gestion/materiels', async (route) => {
+        if (route.request().method() !== 'POST') return route.continue();
+        const response = await route.fetch({ maxRedirects: 0 });
+        expect(response.status()).toBe(302);
+        expect(response.headers().location).toBe(page.url());
+        for (const path of ['/access/context', '/gestion/materiels/lectures']) {
+            const read = await page.request.get(path);
+            expect(read.status()).toBe(200);
+            expect(Boolean(read.headers()['set-cookie'])).toBe(false);
+        }
+        await route.fulfill({ response });
+    });
     await page.getByLabel('Nom *', { exact: true }).fill('Invalid total');
     await page
         .getByLabel('Catégorie *', { exact: true })

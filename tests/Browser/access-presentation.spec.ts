@@ -270,14 +270,12 @@ test('session channel admission checks CSRF and refuses a foreign route', async 
             await page.request.post('/broadcasting/auth', { data: body })
         ).status(),
     ).toBe(419);
-    expect(
-        (
-            await page.request.post('/broadcasting/auth', {
-                headers: await xsrf(page),
-                data: body,
-            })
-        ).status(),
-    ).toBe(200);
+    const admission = await page.request.post('/broadcasting/auth', {
+        headers: await xsrf(page),
+        data: body,
+    });
+    expect(admission.status()).toBe(200);
+    expect(Boolean(admission.headers()['set-cookie'])).toBe(false);
     expect(
         (
             await page.request.post('/broadcasting/auth', {

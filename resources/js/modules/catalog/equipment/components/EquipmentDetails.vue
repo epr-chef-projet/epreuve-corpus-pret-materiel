@@ -2,7 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { toRef } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Button } from '@/components/ui/button';
+import { LoadingButton } from '@/components/ui/button';
 import { manageCatalog } from '@/routes';
 import type { EquipmentData } from '@/types/generated/types/App/Modules/Catalog/PublicApi';
 import type { CommandReceipt } from '@/types/generated/types/App/Infrastructure/Operations';
@@ -27,23 +27,37 @@ const projection = useCatalogProjection(
 <template>
     <section class="flex flex-col gap-5 p-4 sm:p-6">
         <Head :title="t('catalog.details')" />
-        <h1 class="text-2xl font-semibold">{{ t('catalog.details') }}</h1>
+        <div class="relative self-start pr-7">
+            <h1 class="text-2xl font-semibold">{{ t('catalog.details') }}</h1>
+            <EquipmentReadStatus
+                :verifying="
+                    projection.verifying.value &&
+                    !projection.manualRefreshing.value
+                "
+            />
+        </div>
         <Link class="underline" :href="manageCatalog()">{{
             t('catalog.back')
         }}</Link>
-        <EquipmentReadStatus
-            :stale="projection.stale.value"
-            :refreshing="projection.refreshing.value"
-        />
-        <Button
+        <LoadingButton
             variant="outline"
             class="self-start"
+            :label="t('catalog.retryRead')"
+            :busy-label="t('catalog.loading')"
+            :busy="projection.manualRefreshing.value"
+            :disabled="projection.manualRefreshing.value"
             @click="projection.refresh"
-            >{{ t('catalog.retryRead') }}</Button
-        >
+        />
         <div v-if="projection.failed.value" role="alert">
             <p>{{ t('catalog.readFailed') }}</p>
         </div>
+        <p
+            v-else-if="projection.expired.value"
+            role="status"
+            class="text-sm text-muted-foreground"
+        >
+            {{ t('catalog.stale') }}
+        </p>
         <section
             class="grid gap-4 rounded-lg border p-4 sm:grid-cols-[10rem_1fr]"
             :aria-label="t('catalog.currentValues')"
@@ -89,7 +103,7 @@ const projection = useCatalogProjection(
             :equipment="projection.data.value"
             :receipt="receipt"
             :issue="issue"
-            @verified="projection.refresh"
+            @verified="projection.recheck"
         />
     </section>
 </template>

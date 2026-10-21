@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Button } from '@/components/ui/button';
+import { Button, LoadingButton } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import InputError from '@/components/InputError.vue';
@@ -39,16 +39,6 @@ const explanation = computed(() =>
             {{ t('catalog.edit') }}
         </h2>
         <p>{{ t('catalog.required') }}</p>
-        <p class="grid text-sm" role="status">
-            <span
-                class="invisible col-start-1 row-start-1 before:content-[attr(data-sizing-text)]"
-                :data-sizing-text="t('catalog.saved')"
-                aria-hidden="true"
-            />
-            <span class="col-start-1 row-start-1">{{
-                state.saved.value ? t('catalog.saved') : ''
-            }}</span>
-        </p>
         <div v-if="explanation" role="alert">
             <p>{{ explanation.message }}</p>
             <p>{{ explanation.next }}</p>
@@ -164,14 +154,23 @@ const explanation = computed(() =>
                         :message="state.error('totalQuantity')"
                     />
                 </div>
-                <Button
+                <LoadingButton
                     class="self-start"
                     :class="{
                         'disabled:opacity-100':
-                            state.submitting.value ||
+                            (state.submitting.value &&
+                                state.sendingFrom.value === 'submit') ||
                             !state.pending.ready.value,
                     }"
                     type="submit"
+                    :label="
+                        t(equipment ? 'catalog.save' : 'catalog.createSubmit')
+                    "
+                    :busy-label="t('catalog.saving')"
+                    :busy="
+                        state.submitting.value &&
+                        state.sendingFrom.value === 'submit'
+                    "
                     :disabled="
                         state.waiting.value ||
                         state.pendingForTarget.value ||
@@ -179,15 +178,7 @@ const explanation = computed(() =>
                         !state.pending.ready.value ||
                         state.pending.proofs.value.length >= 20
                     "
-                    ><span class="relative size-4" aria-hidden="true">
-                        <span
-                            v-if="state.saving.value"
-                            class="absolute inset-0 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none"
-                        /> </span
-                    >{{
-                        t(equipment ? 'catalog.save' : 'catalog.createSubmit')
-                    }}</Button
-                >
+                />
             </fieldset>
         </form>
         <p v-if="state.preparationFailed.value" role="alert">
@@ -196,22 +187,27 @@ const explanation = computed(() =>
         <p v-if="state.pending.proofs.value.length >= 20" role="status">
             {{ t('catalog.pendingLimit') }}
         </p>
-        <span class="sr-only" role="status">{{
-            state.saving.value ? t('catalog.saving') : ''
-        }}</span>
+        <LoadingButton
+            v-if="
+                state.resumable.value ||
+                (state.submitting.value && state.sendingFrom.value === 'resume')
+            "
+            type="button"
+            variant="outline"
+            class="h-auto min-h-9 max-w-full self-start whitespace-normal"
+            :label="t('catalog.resume')"
+            :busy-label="t('catalog.saving')"
+            :busy="
+                state.submitting.value && state.sendingFrom.value === 'resume'
+            "
+            :disabled="state.submitting.value"
+            @click="state.resume"
+        />
         <PendingOperations
             :receipt="receipt"
             @absent="state.absent"
             @applied="applied"
         />
-        <Button
-            v-if="state.resumable.value"
-            type="button"
-            variant="outline"
-            class="self-start"
-            @click="state.resume"
-            >{{ t('catalog.resume') }}</Button
-        >
         <p v-if="state.pending.unresolved.value.length && !state.waiting.value">
             {{ t('catalog.cannotResume') }}
         </p>

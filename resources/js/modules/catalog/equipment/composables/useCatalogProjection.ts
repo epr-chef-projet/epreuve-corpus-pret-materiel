@@ -1,11 +1,18 @@
-import { inject, onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue';
+import {
+    computed,
+    inject,
+    onScopeDispose,
+    ref,
+    shallowRef,
+    watch,
+    type Ref,
+} from 'vue';
 import {
     sessionSubscriptionsKey,
     useAccessStore,
 } from '@/modules/identity-access/public/access';
 import type { NotificationEnvelopeData } from '@/types/generated/types/App/Shared/Realtime';
 import { isCatalogInvalidation, record } from '../contracts/decoders';
-import { useActivityIndicator } from './useActivityIndicator';
 
 export function useCatalogProjection<T>(
     initial: Ref<T>,
@@ -17,9 +24,10 @@ export function useCatalogProjection<T>(
     const generation = access.generation;
     const data = shallowRef<T>(initial.value);
     const busy = ref(false);
-    const activity = useActivityIndicator(busy);
     const stale = ref(true);
+    const expired = ref(false);
     const failed = ref(false);
+    const manualRefreshing = ref(false);
     let disposed = false;
     let epoch = 0;
     let attempts = 0;
@@ -32,6 +40,16 @@ export function useCatalogProjection<T>(
         NonNullable<typeof subscriptions>['acquire']
     > | null = null;
     const current = () => !disposed && generation === access.generation;
+    function trackFreshness() {
+        clearTimeout(freshness);
+        expired.value = false;
+        freshness = setTimeout(() => {
+            if (current()) {
+                stale.value = true;
+                expired.value = true;
+            }
+        }, 20_000);
+    }
     function schedule(delay = 100) {
         dirty = true;
         if (
@@ -81,6 +99,7 @@ export function useCatalogProjection<T>(
         const observedEpoch = epoch;
         const key = identity();
         const controller = new AbortController();
+        let failedRead = false;
         abort = controller;
         consumer?.capture();
         try {
@@ -96,12 +115,10 @@ export function useCatalogProjection<T>(
             stale.value = false;
             failed.value = false;
             attempts = 0;
-            clearTimeout(freshness);
-            freshness = setTimeout(() => {
-                if (current()) stale.value = true;
-            }, 20_000);
+            trackFreshness();
         } catch {
             if (current() && !controller.signal.aborted) {
+                failedRead = true;
                 failed.value = true;
                 stale.value = true;
                 dirty = true;
@@ -114,6 +131,8 @@ export function useCatalogProjection<T>(
                     schedule(
                         ++attempts < 3 ? 100 : 15_000 + Math.random() * 2000,
                     );
+                if (!dirty || failedRead || attempts >= 3)
+                    manualRefreshing.value = false;
             }
         }
     }
@@ -121,6 +140,7 @@ export function useCatalogProjection<T>(
         consumer = subscriptions.acquire(access.context, {
             onSubscribed: () => {
                 epoch++;
+                stale.value = true;
                 schedule(0);
             },
             onStale: () => {
@@ -134,14 +154,19 @@ export function useCatalogProjection<T>(
         if (current()) {
             data.value = value;
             stale.value = true;
+            failed.value = false;
+            manualRefreshing.value = false;
+            trackFreshness();
             epoch++;
             abort?.abort();
             schedule(0);
         }
     });
     const stopIdentity = watch(identity, () => {
+        if (!current()) return;
         epoch++;
         stale.value = true;
+        manualRefreshing.value = false;
         abort?.abort();
         schedule(0);
     });
@@ -159,7 +184,7 @@ export function useCatalogProjection<T>(
     function dispose() {
         if (disposed) return;
         disposed = true;
-        activity.dispose();
+        manualRefreshing.value = false;
         abort?.abort();
         clearTimeout(timer);
         clearTimeout(periodic);
@@ -177,15 +202,30 @@ export function useCatalogProjection<T>(
         disown();
         dispose();
     });
+    trackFreshness();
     schedule(0);
     poll();
     return {
         data,
         busy,
-        refreshing: activity.visible,
         stale,
+        expired,
+        verifying: computed(
+            () => stale.value && !expired.value && !failed.value,
+        ),
+        manualRefreshing,
         failed,
         refresh: () => {
+            if (!current()) return;
+            clearTimeout(timer);
+            timer = undefined;
+            attempts = 0;
+            epoch++;
+            manualRefreshing.value = true;
+            schedule(0);
+        },
+        recheck: () => {
+            if (!current()) return;
             epoch++;
             schedule(0);
         },

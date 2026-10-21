@@ -3,13 +3,13 @@ import type { ToasterProps } from 'vue-sonner';
 import {
     CircleCheckIcon,
     InfoIcon,
-    Loader2Icon,
     OctagonXIcon,
     TriangleAlertIcon,
     XIcon,
 } from '@lucide/vue';
 import { Toaster as Sonner } from 'vue-sonner';
 import { cn } from '@/lib/utils';
+import { Spinner } from '@/components/ui/spinner';
 
 import 'vue-sonner/style.css';
 
@@ -42,7 +42,7 @@ defineOptions({ name: 'UiSonner' });
         </template>
         <template #loading-icon>
             <div>
-                <Loader2Icon class="size-4 animate-spin" />
+                <Spinner />
             </div>
         </template>
         <template #close-icon>

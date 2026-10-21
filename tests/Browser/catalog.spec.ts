@@ -1,9 +1,17 @@
-import { expect, test, type Page } from '@playwright/test';
+import {
+    errors as playwrightErrors,
+    expect,
+    test,
+    type Page,
+} from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import {
     observeCatalogRendering,
     takeCatalogRendering,
+    observeButtonRendering,
+    takeButtonRendering,
+    type ButtonRender,
 } from './catalogRendering';
 
 const accounts = JSON.parse(
@@ -89,6 +97,33 @@ async function create(page: Page, name: string) {
     ).toBeVisible();
     return page.url();
 }
+function expectButtonStable(renders: ButtonRender[]) {
+    expect(renders.length).toBeGreaterThan(0);
+    for (const key of ['width', 'height', 'top', 'left'] as const)
+        expect(
+            new Set(renders.map((render) => render[key])).size,
+            JSON.stringify(renders),
+        ).toBe(1);
+    expect(
+        renders.every((render) => Math.abs(render.labelOffset) <= 1),
+        JSON.stringify(renders),
+    ).toBe(true);
+}
+
+async function recoverAccess(page: Page) {
+    try {
+        await page
+            .getByRole('button', { name: 'Vérifier mon accès', exact: true })
+            .click({ timeout: 1500 });
+    } catch (error) {
+        if (!(error instanceof playwrightErrors.TimeoutError)) throw error;
+        await expect(
+            page.getByText('Connexion interrompue.', { exact: false }),
+        ).toHaveCount(0);
+    }
+    await expect(page.locator('[inert]')).toHaveCount(0);
+}
+
 test.beforeEach(() => {
     errors.length = 0;
 });
@@ -108,6 +143,71 @@ test.afterAll(() => {
 });
 
 for (const width of [1280, 360]) {
+    test(`a slow search keeps its button centered and its dimensions stable at ${width}px`, async ({
+        page,
+    }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await signIn(page);
+        if (width === 360)
+            await page.getByLabel('Langue de l’interface').selectOption('en');
+        await page
+            .locator('#equipment-search')
+            .fill('No match ' + randomUUID());
+        const button = page.locator('form button[type="submit"]');
+        await expect(button).toBeEnabled();
+        let release = () => {};
+        const held = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let arrived = () => {};
+        const waiting = new Promise<void>((resolve) => {
+            arrived = resolve;
+        });
+        const pattern = (url: URL) => url.pathname === '/gestion/materiels';
+        await page.route(pattern, async (route) => {
+            const response = await route.fetch();
+            arrived();
+            await held;
+            await route.fulfill({ response });
+        });
+        try {
+            await observeButtonRendering(page, 'form button[type="submit"]');
+            await observeCatalogRendering(page, '#equipment-search');
+            await button.click();
+            await waiting;
+            await expect(button).toBeDisabled();
+            await expect(button).toHaveAttribute('aria-busy', 'true');
+            await expect(button.locator('svg')).toBeVisible();
+            await expect(
+                page.getByTestId('catalog-verification').locator('svg'),
+            ).toHaveCount(0);
+            await expect(
+                page.locator('form').getByRole('button').last().locator('svg'),
+            ).toHaveCount(0);
+            await page.screenshot({
+                path: `project-management/local/acces-et-materiels/a-03/execution/ui-presentation/search-${width}.png`,
+            });
+            release();
+            await expect(button).toBeEnabled();
+            await expect(button.locator('svg')).toHaveCount(0);
+            const buttonRenders = await takeButtonRendering(page);
+            expectButtonStable(buttonRenders);
+            expect(
+                buttonRenders.some((render) => render.busy && render.spinner),
+            ).toBe(true);
+            const renders = await takeCatalogRendering(page);
+            expect(new Set(renders.map((render) => render.top)).size).toBe(1);
+            await expect(
+                page.getByText(
+                    /Informations vérifiées|Informations à vérifier|Verified information|Information awaiting verification/,
+                ),
+            ).toHaveCount(0);
+        } finally {
+            release();
+            await page.unroute(pattern);
+        }
+    });
+
     test(`catalog rendering remains stable during search and its automatic recheck at ${width}px`, async ({
         page,
     }) => {
@@ -143,6 +243,7 @@ for (const width of [1280, 360]) {
         if (width === 360)
             await page.getByLabel('Langue de l’interface').selectOption('en');
         await observeCatalogRendering(page, `a[href="${path}"]`);
+        await observeButtonRendering(page, 'form button[type="submit"]');
         const search = page.waitForResponse(
             (response) =>
                 new URL(response.url()).pathname === '/gestion/materiels' &&
@@ -179,6 +280,14 @@ for (const width of [1280, 360]) {
         expect(
             renders.some((render) => render.top === null || render.pending),
         ).toBe(false);
+        const buttonRenders = await takeButtonRendering(page);
+        expectButtonStable(buttonRenders);
+        expect(buttonRenders.at(-1)?.spinner).toBe(false);
+        await expect(
+            page.getByText(
+                /Informations vérifiées|Informations à vérifier|Verified information|Information awaiting verification/,
+            ),
+        ).toHaveCount(0);
     });
 }
 
@@ -208,15 +317,14 @@ test('catalog rendering does not present a normal save as an unknown result or m
         ),
     ).toBe(false);
     await expect(
-        page
-            .getByRole('status')
-            .filter({ hasText: 'Enregistrement confirmé.' }),
+        page.getByText('Enregistrement confirmé.', { exact: true }),
     ).toBeVisible();
     for (const version of [1, 2]) {
         await page
             .getByLabel('Nom *', { exact: true })
             .fill(name + ' ' + version);
         await observeCatalogRendering(page, '#equipment-name');
+        await observeButtonRendering(page, 'form button[type="submit"]');
         await page
             .getByRole('button', {
                 name: 'Enregistrer les textes',
@@ -230,15 +338,84 @@ test('catalog rendering does not present a normal save as an unknown result or m
             }),
         ).toBeVisible();
         await expect(
-            page
-                .getByRole('status')
-                .filter({ hasText: 'Enregistrement confirmé.' }),
+            page.getByText('Enregistrement confirmé.', { exact: true }),
         ).toBeVisible();
         const renders = await takeCatalogRendering(page);
         expect(
             renders.some((render) => render.pending || render.conflict),
         ).toBe(false);
         expect(new Set(renders.map((render) => render.top)).size).toBe(1);
+        expectButtonStable(await takeButtonRendering(page));
+    }
+});
+
+test('a slow creation shows its spinner inside a stable centered button', async ({
+    page,
+}) => {
+    await page.setViewportSize({ width: 360, height: 900 });
+    await signIn(page);
+    await page
+        .getByRole('link', { name: 'Créer un matériel', exact: true })
+        .click();
+    const name = 'S' + randomUUID().slice(0, 6);
+    await page.getByLabel('Nom *', { exact: true }).fill(name);
+    await page
+        .getByLabel('Catégorie *', { exact: true })
+        .fill('A03 browser tools');
+    await page.getByLabel('Quantité initiale *', { exact: true }).fill('2');
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let arrived = () => {};
+    const waiting = new Promise<void>((resolve) => {
+        arrived = resolve;
+    });
+    const pattern = (url: URL) => url.pathname === '/gestion/materiels';
+    await page.route(pattern, async (route) => {
+        if (route.request().method() !== 'POST') return route.continue();
+        const response = await route.fetch({ maxRedirects: 0 });
+        arrived();
+        await held;
+        await route.fulfill({ response });
+    });
+    try {
+        const button = page.getByRole('button', {
+            name: 'Créer le matériel',
+            exact: true,
+        });
+        await observeButtonRendering(page, 'form button[type="submit"]');
+        await observeCatalogRendering(page, '#equipment-name');
+        await button.click();
+        await waiting;
+        await expect(button).toHaveAttribute('aria-busy', 'true');
+        await expect(button.locator('svg')).toBeVisible();
+        await expect(button).toBeDisabled();
+        await expect(
+            page.getByRole('heading', { name: 'Enregistrements à vérifier' }),
+        ).toHaveCount(0);
+        expectButtonStable(await takeButtonRendering(page));
+        const renders = await takeCatalogRendering(page);
+        expect(new Set(renders.map((render) => render.top)).size).toBe(1);
+        await page.screenshot({
+            path: 'project-management/local/acces-et-materiels/a-03/execution/ui-presentation/create-360.png',
+        });
+        release();
+        await expect(
+            page.getByRole('heading', { name, exact: true }),
+        ).toBeVisible();
+        await expect(
+            page.getByText('Enregistrement confirmé.', { exact: true }),
+        ).toBeVisible();
+        await expect(
+            page.getByRole('button', {
+                name: 'Enregistrer les textes',
+                exact: true,
+            }),
+        ).toBeEnabled();
+    } finally {
+        release();
+        await page.unroute(pattern);
     }
 });
 
@@ -251,9 +428,7 @@ test('a slow save stays visible without a false uncertainty and releases control
     const nextName = 'T' + name.slice(1);
     const url = await create(page, name);
     await expect(
-        page
-            .getByRole('status')
-            .filter({ hasText: 'Enregistrement confirmé.' }),
+        page.getByText('Enregistrement confirmé.', { exact: true }),
     ).toBeVisible();
     await page.evaluate(() => {
         document.documentElement.style.zoom = '2';
@@ -278,6 +453,7 @@ test('a slow save stays visible without a false uncertainty and releases control
     });
     try {
         await observeCatalogRendering(page, '#equipment-name');
+        await observeButtonRendering(page, 'form button[type="submit"]');
         const button = page.getByRole('button', {
             name: 'Enregistrer les textes',
             exact: true,
@@ -312,15 +488,13 @@ test('a slow save stays visible without a false uncertainty and releases control
             'opacity',
             '1',
         );
-        await expect(
-            page
-                .getByRole('status')
-                .filter({ hasText: 'Enregistrement en cours…' }),
-        ).toHaveText('Enregistrement en cours…');
-        await expect(button.locator('span > span')).toHaveCSS(
-            'animation-name',
-            'none',
+        await expect(button).toHaveAttribute('aria-busy', 'true');
+        await expect(button).toHaveAttribute(
+            'aria-description',
+            'Enregistrement en cours…',
         );
+        await expect(button.locator('svg')).toBeVisible();
+        await expect(button.locator('svg')).toHaveCSS('animation-name', 'none');
         await expect(
             page.getByRole('heading', {
                 name: 'Enregistrements à vérifier',
@@ -333,9 +507,7 @@ test('a slow save stays visible without a false uncertainty and releases control
         ).toBeVisible();
         await expect(button).toBeEnabled();
         await expect(
-            page
-                .getByRole('status')
-                .filter({ hasText: 'Enregistrement confirmé.' }),
+            page.getByText('Enregistrement confirmé.', { exact: true }),
         ).toBeVisible();
         const renders = await takeCatalogRendering(page);
         expect(
@@ -346,6 +518,8 @@ test('a slow save stays visible without a false uncertainty and releases control
             new Set(renders.map((render) => render.top)).size,
             JSON.stringify(renders),
         ).toBe(1);
+        await expect(button.locator('svg')).toHaveCount(0);
+        expectButtonStable(await takeButtonRendering(page));
     } finally {
         release();
         await page.unroute(url);
@@ -397,10 +571,13 @@ test('a known empty search remains visible during a slow automatic check', async
         );
         await expect(empty).toBeVisible();
         await expect(
+            page.getByTestId('catalog-verification').locator('svg'),
+        ).toHaveCount(0);
+        await expect(
             page
-                .getByRole('status')
-                .filter({ hasText: 'Actualisation en cours…' }),
-        ).toHaveText('Actualisation en cours…');
+                .getByRole('button', { name: 'Rechercher', exact: true })
+                .locator('svg'),
+        ).toHaveCount(0);
         release();
         await expect(page.locator('ul[aria-busy]')).toHaveAttribute(
             'aria-busy',
@@ -411,6 +588,75 @@ test('a known empty search remains visible during a slow automatic check', async
         expect(new Set(renders.map((render) => render.top)).size).toBe(1);
     } finally {
         release();
+        await page.unroute(pattern);
+    }
+});
+
+test('initial verification stays discreet and a genuine read failure offers a visible manual recovery', async ({
+    page,
+}) => {
+    await signIn(page);
+    const name = 'A03 reading ' + randomUUID();
+    const url = await create(page, name);
+    const pattern = (value: URL) =>
+        value.pathname === new URL(url).pathname + '/lecture';
+    let mode: 'initial' | 'fail' | 'retry' = 'initial';
+    let releaseInitial = () => {};
+    const initial = new Promise<void>((resolve) => {
+        releaseInitial = resolve;
+    });
+    let releaseRetry = () => {};
+    const retry = new Promise<void>((resolve) => {
+        releaseRetry = resolve;
+    });
+    await page.route(pattern, async (route) => {
+        if (mode === 'fail') return route.abort('failed');
+        if (mode === 'initial') await initial;
+        else await retry;
+        await route.continue();
+    });
+    try {
+        await page.reload();
+        const heading = page.getByRole('heading', { name, exact: true });
+        const indicator = page
+            .getByTestId('catalog-verification')
+            .locator('svg');
+        await expect(heading).toBeVisible();
+        await expect(indicator).toBeVisible();
+        await observeCatalogRendering(page, '#equipment-name');
+        releaseInitial();
+        await expect(indicator).toHaveCount(0);
+        const renders = await takeCatalogRendering(page);
+        expect(new Set(renders.map((render) => render.top)).size).toBe(1);
+        mode = 'fail';
+        const button = page.getByRole('button', {
+            name: 'Actualiser',
+            exact: true,
+        });
+        await button.click();
+        await expect(page.getByRole('alert')).toContainText(
+            'La consultation a échoué.',
+        );
+        await expect(heading).toBeVisible();
+        await expect(page.getByLabel('Nom *', { exact: true })).toHaveValue(
+            name,
+        );
+        await expect(button).toBeEnabled();
+        mode = 'retry';
+        await observeButtonRendering(page, 'button[aria-label="Actualiser"]');
+        await button.click();
+        await expect(button.locator('svg')).toBeVisible();
+        await expect(button).toBeDisabled();
+        await expect(indicator).toHaveCount(0);
+        releaseRetry();
+        await expect(button).toBeEnabled();
+        await expect(button.locator('svg')).toHaveCount(0);
+        await expect(page.getByRole('alert')).toHaveCount(0);
+        expectButtonStable(await takeButtonRendering(page));
+        await expect(heading).toBeVisible();
+    } finally {
+        releaseInitial();
+        releaseRetry();
         await page.unroute(pattern);
     }
 });
@@ -430,9 +676,7 @@ test('an intervening authorized read does not consume the confirmation of a succ
     const name = 'A03 receipt race ' + randomUUID();
     const url = await create(page, name);
     await expect(
-        page
-            .getByRole('status')
-            .filter({ hasText: 'Enregistrement confirmé.' }),
+        page.getByText('Enregistrement confirmé.', { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole('heading', {
@@ -457,9 +701,7 @@ test('an intervening authorized read does not consume the confirmation of a succ
         page.getByRole('heading', { name: name + ' corrigé', exact: true }),
     ).toBeVisible();
     await expect(
-        page
-            .getByRole('status')
-            .filter({ hasText: 'Enregistrement confirmé.' }),
+        page.getByText('Enregistrement confirmé.', { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole('heading', {
@@ -529,9 +771,7 @@ test('a newer external version before acknowledgement preserves the confirmed pr
         ).toBeVisible({ timeout: 20_000 });
         release();
         await expect(
-            page
-                .getByRole('status')
-                .filter({ hasText: 'Enregistrement confirmé.' }),
+            page.getByText('Enregistrement confirmé.', { exact: true }),
         ).toBeVisible();
         await expect(
             page
@@ -730,18 +970,40 @@ test('a response lost after commit is verified without a duplicate and without p
     await expect(
         page.getByText('Connexion interrompue.', { exact: false }),
     ).toBeVisible();
-    await page
-        .getByRole('button', { name: 'Vérifier mon accès', exact: true })
-        .click();
+    await recoverAccess(page);
     await expect(page.getByLabel('Nom *', { exact: true })).toHaveValue(name);
     const stored = await page.evaluate(() =>
         sessionStorage.getItem('epr.pendingCatalogOperations'),
     );
     expect(stored).not.toContain(name);
     expect(stored).not.toContain('A03 browser tools');
-    await page
-        .getByRole('button', { name: 'Vérifier le résultat', exact: true })
-        .click();
+    let releaseCheck = () => {};
+    const checking = new Promise<void>((resolve) => {
+        releaseCheck = resolve;
+    });
+    const operationPattern = (url: URL) =>
+        url.pathname === '/gestion/materiels/operations';
+    await page.route(operationPattern, async (route) => {
+        const response = await route.fetch();
+        await checking;
+        await route.fulfill({ response });
+    });
+    try {
+        const checkButton = page.getByRole('button', {
+            name: 'Vérifier le résultat',
+            exact: true,
+        });
+        await observeButtonRendering(
+            page,
+            'button[aria-label="Vérifier le résultat"]',
+        );
+        await checkButton.click();
+        await expect(checkButton).toBeDisabled();
+        await expect(checkButton.locator('svg')).toBeVisible();
+        expectButtonStable(await takeButtonRendering(page));
+    } finally {
+        releaseCheck();
+    }
     await expect(
         page
             .getByRole('status')
@@ -804,6 +1066,7 @@ test('a lost response survives reload as a minimal proof and prevents a second c
 test('an uncommitted send resumes only after checking and with exactly the same body and key', async ({
     page,
 }) => {
+    await page.setViewportSize({ width: 360, height: 900 });
     await signIn(page);
     await page
         .getByRole('link', { name: 'Créer un matériel', exact: true })
@@ -815,11 +1078,19 @@ test('an uncommitted send resumes only after checking and with exactly the same 
         .fill('A03 browser tools');
     await page.getByLabel('Quantité initiale *', { exact: true }).fill('0');
     const bodies: unknown[] = [];
+    let releaseResume = () => {};
+    const resumed = new Promise<void>((resolve) => {
+        releaseResume = resolve;
+    });
     await page.route('**/gestion/materiels', async (route) => {
         if (route.request().method() !== 'POST') return route.continue();
         bodies.push(route.request().postDataJSON());
         if (bodies.length === 1) await route.abort('failed');
-        else await route.continue();
+        else {
+            const response = await route.fetch({ maxRedirects: 0 });
+            await resumed;
+            await route.fulfill({ response });
+        }
     });
     await page
         .getByRole('button', { name: 'Créer le matériel', exact: true })
@@ -827,9 +1098,7 @@ test('an uncommitted send resumes only after checking and with exactly the same 
     await expect(
         page.getByText('Connexion interrompue.', { exact: false }),
     ).toBeVisible();
-    await page
-        .getByRole('button', { name: 'Vérifier mon accès', exact: true })
-        .click();
+    await recoverAccess(page);
     await page
         .getByRole('button', { name: 'Vérifier le résultat', exact: true })
         .click();
@@ -838,9 +1107,27 @@ test('an uncommitted send resumes only after checking and with exactly the same 
     await page
         .getByLabel('Nom *', { exact: true })
         .fill('This changed draft must not replace the held body');
-    await page
-        .getByRole('button', { name: 'Reprendre exactement', exact: false })
-        .click();
+    const resumeButton = page.getByRole('button', {
+        name: 'Reprendre exactement',
+        exact: false,
+    });
+    await expect(resumeButton).toBeInViewport();
+    const bounds = await resumeButton.boundingBox();
+    if (!bounds) throw new Error('The resume button has no visible bounds');
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(360);
+    await observeButtonRendering(
+        page,
+        'button[aria-label="Reprendre exactement le même enregistrement"]',
+    );
+    try {
+        await resumeButton.click();
+        await expect(resumeButton).toBeVisible();
+        await expect(resumeButton).toBeDisabled();
+        await expect(resumeButton.locator('svg')).toBeVisible();
+        expectButtonStable(await takeButtonRendering(page));
+    } finally {
+        releaseResume();
+    }
     await expect(
         page.getByRole('heading', { name, exact: true }),
     ).toBeVisible();
@@ -941,7 +1228,7 @@ test('the visible screen recovers within twenty seconds when its last real notif
         await expect.poll(() => subscribed).toBe(true);
         await expect(
             other.getByText(
-                'Les informations affichées ne sont pas encore revérifiées.',
+                'La mise à jour prend du retard. Les dernières informations connues restent affichées ; actualise pour les vérifier.',
                 { exact: true },
             ),
         ).toHaveCount(0);
@@ -1037,9 +1324,7 @@ test('checking a lost edit rereads the current equipment while keeping a later d
     await expect(
         page.getByText('Connexion interrompue.', { exact: false }),
     ).toBeVisible();
-    await page
-        .getByRole('button', { name: 'Vérifier mon accès', exact: true })
-        .click();
+    await recoverAccess(page);
     await expect(page.locator('[inert]')).toHaveCount(0);
     await page
         .getByLabel('Nom *', { exact: true })

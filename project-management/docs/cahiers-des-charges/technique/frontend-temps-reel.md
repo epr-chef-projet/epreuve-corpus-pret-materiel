@@ -1,6 +1,6 @@
 # Frontend et synchronisation
 
-**Version 1.3 - spécification technique.** Ce chapitre possède les choix de présentation et de synchronisation. Le [fonctionnel](../fonctionnel/cadre-et-acces.md) possède les comportements ; les [contrats](../../interne/architecture/contrats-et-lots.md) possèdent champs, opérations et erreurs ; l'[environnement](../../interne/developpement/environnement.md) possède versions, adresses et secrets.
+**Version 1.4 - spécification technique.** Ce chapitre possède les choix de présentation et de synchronisation. Le [fonctionnel](../fonctionnel/cadre-et-acces.md) possède les comportements ; les [contrats](../../interne/architecture/contrats-et-lots.md) possèdent champs, opérations et erreurs ; l'[environnement](../../interne/developpement/environnement.md) possède versions, adresses et secrets.
 
 ## 1. Pages, état et représentations
 
@@ -64,7 +64,9 @@ Récupération à ouverture, réabonnement, retour au premier plan et reprise r�
 
 Après perte Reverb, indiquer dégradation et poursuivre les lectures autorisées bornées ; après perte HTTP, indiquer hors connexion et empêcher un envoi annoncé comme réussi. Trois tentatives de connexion espacées 1/2/5 s puis 15 s avec dispersion, sans réémettre les anciennes mutations. Une projection non revérifiée depuis 20 s reste affichable comme dernière information connue avec avertissement, jamais comme quantité garantie.
 
-Les lectures de vérification conservent la liste, la fiche ou le résultat vide déjà obtenu. Leur activité réseau et la validité des informations sont restituées séparément, dans un emplacement stable ; une vérification sans changement métier ne déplace pas les champs ou les commandes. Les confirmations d’enregistrement ont aussi leur emplacement réservé. Les indicateurs transitoires attendent 250 ms avant affichage et restent perceptibles au moins 300 ms une fois affichés ; cette temporisation concerne leur présentation, sans retarder le résultat, les erreurs, les protections des commandes ou le retrait immédiat d’un ancien contexte. Les annonces regroupent les états utiles et respectent la préférence de mouvement réduit.
+Les lectures de vérification conservent la liste, la fiche ou le résultat vide déjà obtenu. Une vérification périodique réussie reste silencieuse : aucun message positif permanent ni indicateur sur un bouton non sollicité. Une récupération non encore vérifiée à l’ouverture ou à la reprise est signalée discrètement dans l’entête existant, sans ajouter de ligne ni déplacer le contenu. Une fraîcheur dépassée ou une panne réelle conserve son avertissement explicite ; le chargement ne le remplace pas.
+
+Une action déclenchée par l’utilisateur indique son attente sur le bouton concerné. Son texte est centré au repos ; un indicateur à traits radiaux le remplace pendant l’attente, sans changement des dimensions du bouton. Les confirmations d’enregistrement sont fondées sur le reçu et présentées dans une notification non bloquante hors du flux du formulaire, retirée à la sortie du contexte. Les indicateurs transitoires attendent 250 ms avant affichage et restent perceptibles au moins 300 ms une fois affichés ; cette temporisation concerne leur présentation, sans retarder le résultat, les erreurs, les protections des commandes ou le retrait immédiat d’un ancien contexte. Les annonces regroupent les états utiles et respectent la préférence de mouvement réduit.
 
 ## 4. Langues et sortie du contexte
 

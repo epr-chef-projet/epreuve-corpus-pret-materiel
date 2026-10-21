@@ -2,7 +2,7 @@
 import { Link } from '@inertiajs/vue3';
 import { computed, ref, watch, onScopeDispose } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Button } from '@/components/ui/button';
+import { LoadingButton } from '@/components/ui/button';
 import { show } from '@/routes/catalog';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import {
@@ -109,22 +109,18 @@ onScopeDispose(() => controllers.forEach((controller) => controller.abort()));
                 >
                     {{ t('catalog.verifyFailed') }}
                 </p>
-                <Button
+                <LoadingButton
                     type="button"
                     variant="outline"
+                    :label="t('catalog.verify')"
+                    :busy-label="t('catalog.checking')"
+                    :busy="statuses[proof.operationKey] === 'checking'"
                     :disabled="
                         statuses[proof.operationKey] === 'checking' ||
                         access.status !== 'active'
                     "
                     @click="check(proof)"
-                    >{{
-                        t(
-                            statuses[proof.operationKey] === 'checking'
-                                ? 'catalog.checking'
-                                : 'catalog.verify',
-                        )
-                    }}</Button
-                >
+                />
             </li>
             <li v-for="(id, key) in appliedLinks" :key="key" role="status">
                 {{ t('catalog.applied') }}

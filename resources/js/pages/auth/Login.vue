@@ -5,10 +5,9 @@ import { nextTick, onScopeDispose } from 'vue';
 import { useI18n } from 'vue-i18n';
 import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
-import { Button } from '@/components/ui/button';
+import { LoadingButton } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Spinner } from '@/components/ui/spinner';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import { fieldError } from '@/shared/i18n/fieldError';
 import { store } from '@/routes/login';
@@ -78,14 +77,14 @@ function submit() {
                 />
                 <InputError id="password-error" :message="error('password')" />
             </div>
-            <Button
+            <LoadingButton
                 type="submit"
+                :label="t('identity.signIn')"
+                :busy-label="t('identity.signingIn')"
+                :busy="form.processing"
                 :disabled="form.processing || access.status === 'offline'"
                 data-test="login-button"
-                ><Spinner v-if="form.processing" />{{
-                    t('identity.signIn')
-                }}</Button
-            >
+            />
         </form>
     </div>
 </template>

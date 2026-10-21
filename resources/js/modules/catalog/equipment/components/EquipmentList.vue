@@ -3,9 +3,10 @@ import type { ManagementPageData as EquipmentPage } from '@/types/generated/type
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import InputError from '@/components/InputError.vue';
 import { fieldError } from '@/shared/i18n/fieldError';
-import { computed, reactive, toRef, watch } from 'vue';
+import { computed, onScopeDispose, reactive, ref, toRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Button } from '@/components/ui/button';
+import { Button, LoadingButton } from '@/components/ui/button';
+import { useAccessStore } from '@/modules/identity-access/public/access';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { create, show } from '@/routes/catalog';
@@ -22,6 +23,18 @@ const props = defineProps<{
 const composer = useI18n();
 const { t } = composer;
 const page = usePage();
+const access = useAccessStore();
+const generation = access.generation;
+const activeVisit = ref<'search' | 'clear' | 'previous' | 'next' | null>(null);
+let visitId = 0;
+const disown = access.own(() => {
+    visitId++;
+    activeVisit.value = null;
+});
+onScopeDispose(() => {
+    visitId++;
+    disown();
+});
 const error = (name: string) =>
     fieldError(
         page.props.validationPresentation,
@@ -46,7 +59,13 @@ const projection = useCatalogProjection(
     (signal) => readEquipmentPage(props.query, signal),
 );
 const rows = computed(() => projection.data.value.items);
-function visit(page = 1) {
+function visit(
+    page = 1,
+    action: NonNullable<typeof activeVisit.value> = 'search',
+) {
+    if (activeVisit.value || generation !== access.generation) return;
+    const id = ++visitId;
+    activeVisit.value = action;
     router.get(
         manageCatalog.url(),
         {
@@ -55,13 +74,21 @@ function visit(page = 1) {
             page,
             perPage: props.query.perPage,
         },
-        { preserveState: true, preserveScroll: true },
+        {
+            preserveState: true,
+            preserveScroll: true,
+            onFinish: () => {
+                if (id === visitId && generation === access.generation)
+                    activeVisit.value = null;
+            },
+        },
     );
 }
 function clear() {
+    if (activeVisit.value) return;
     fields.search = '';
     fields.category = '';
-    visit();
+    visit(1, 'clear');
 }
 </script>
 
@@ -69,7 +96,16 @@ function clear() {
     <section class="flex flex-col gap-5 p-4 sm:p-6">
         <Head :title="t('catalog.title')" />
         <div class="flex flex-wrap items-center justify-between gap-3">
-            <h1 class="text-2xl font-semibold">{{ t('catalog.title') }}</h1>
+            <div class="relative pr-7">
+                <h1 class="text-2xl font-semibold">{{ t('catalog.title') }}</h1>
+                <EquipmentReadStatus
+                    :verifying="
+                        projection.verifying.value &&
+                        !activeVisit &&
+                        !projection.manualRefreshing.value
+                    "
+                />
+            </div>
             <Button as-child
                 ><Link :href="create()">{{ t('catalog.create') }}</Link></Button
             >
@@ -82,6 +118,8 @@ function clear() {
                 ><Input
                     id="equipment-search"
                     v-model="fields.search"
+                    :disabled="activeVisit !== null"
+                    class="disabled:opacity-100"
                     maxlength="120"
                     :aria-invalid="Boolean(page.props.errors.search)"
                     aria-describedby="equipment-search-error"
@@ -97,6 +135,8 @@ function clear() {
                 ><Input
                     id="equipment-category"
                     v-model="fields.category"
+                    :disabled="activeVisit !== null"
+                    class="disabled:opacity-100"
                     maxlength="80"
                     :aria-invalid="Boolean(page.props.errors.category)"
                     aria-describedby="equipment-category-filter-error"
@@ -105,24 +145,46 @@ function clear() {
                     :message="error('category')"
                 />
             </div>
-            <Button type="submit">{{ t('catalog.searchSubmit') }}</Button
-            ><Button type="button" variant="outline" @click="clear">{{
-                t('catalog.clear')
-            }}</Button>
+            <LoadingButton
+                type="submit"
+                :label="t('catalog.searchSubmit')"
+                :busy-label="t('catalog.loading')"
+                :busy="activeVisit === 'search'"
+                :disabled="activeVisit !== null"
+                :class="{ 'disabled:opacity-100': activeVisit !== null }"
+            />
+            <LoadingButton
+                type="button"
+                variant="outline"
+                :label="t('catalog.clear')"
+                :busy-label="t('catalog.loading')"
+                :busy="activeVisit === 'clear'"
+                :disabled="activeVisit !== null"
+                :class="{ 'disabled:opacity-100': activeVisit !== null }"
+                @click="clear"
+            />
         </form>
         <p v-if="page.props.errors.catalog" role="alert">
             {{ error('catalog') }}
         </p>
-        <EquipmentReadStatus
-            :stale="projection.stale.value"
-            :refreshing="projection.refreshing.value"
-        />
         <div v-if="projection.failed.value" role="alert">
             <p>{{ t('catalog.readFailed') }}</p>
-            <Button variant="outline" @click="projection.refresh">{{
-                t('catalog.retryRead')
-            }}</Button>
+            <LoadingButton
+                variant="outline"
+                :label="t('catalog.retryRead')"
+                :busy-label="t('catalog.loading')"
+                :busy="projection.manualRefreshing.value"
+                :disabled="projection.manualRefreshing.value"
+                @click="projection.refresh"
+            />
         </div>
+        <p
+            v-else-if="projection.expired.value"
+            role="status"
+            class="text-sm text-muted-foreground"
+        >
+            {{ t('catalog.stale') }}
+        </p>
         <p v-if="rows.length === 0 && !projection.failed.value" role="status">
             {{
                 t(
@@ -176,19 +238,27 @@ function clear() {
             class="flex flex-wrap items-center gap-3"
             :aria-label="t('catalog.title')"
         >
-            <Button
+            <LoadingButton
                 variant="outline"
-                :disabled="query.page <= 1"
-                @click="visit(query.page - 1)"
-                >{{ t('catalog.previous') }}</Button
-            >
+                :disabled="query.page <= 1 || activeVisit !== null"
+                :class="{ 'disabled:opacity-100': activeVisit !== null }"
+                :label="t('catalog.previous')"
+                :busy-label="t('catalog.loading')"
+                :busy="activeVisit === 'previous'"
+                @click="visit(query.page - 1, 'previous')"
+            />
             <p>{{ t('catalog.page', { page: query.page }) }}</p>
-            <Button
+            <LoadingButton
                 variant="outline"
-                :disabled="!projection.data.value.hasMore"
-                @click="visit(query.page + 1)"
-                >{{ t('catalog.next') }}</Button
-            >
+                :disabled="
+                    !projection.data.value.hasMore || activeVisit !== null
+                "
+                :class="{ 'disabled:opacity-100': activeVisit !== null }"
+                :label="t('catalog.next')"
+                :busy-label="t('catalog.loading')"
+                :busy="activeVisit === 'next'"
+                @click="visit(query.page + 1, 'next')"
+            />
         </nav>
     </section>
 </template>

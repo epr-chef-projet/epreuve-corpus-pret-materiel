@@ -23,8 +23,6 @@ export const catalogMessages = {
             empty: 'Aucun matériel dans cet atelier.',
             noResults: 'Aucun matériel ne correspond à ces critères.',
             loading: 'Actualisation en cours…',
-            unverified: 'Informations à vérifier',
-            verified: 'Informations vérifiées',
             readFailed:
                 'La consultation a échoué. La dernière information connue est conservée.',
             retryRead: 'Actualiser',
@@ -40,7 +38,7 @@ export const catalogMessages = {
                 'Disponibilité réelle, prêts, modification du total, archivage et images seront raccordés lors des prochaines étapes.',
             totalNotice:
                 'Cette quantité est le total recensé. Elle ne représente pas la disponibilité au prêt.',
-            stale: 'Les informations affichées ne sont pas encore revérifiées.',
+            stale: 'La mise à jour prend du retard. Les dernières informations connues restent affichées ; actualise pour les vérifier.',
             conflict:
                 'La fiche a changé ailleurs. Ta saisie est conservée avec sa version de départ.',
             loadCurrent: 'Reprendre les valeurs actuelles',
@@ -105,8 +103,6 @@ export const catalogMessages = {
             empty: 'There is no equipment in this workshop.',
             noResults: 'No equipment matches these filters.',
             loading: 'Refreshing…',
-            unverified: 'Information awaiting verification',
-            verified: 'Verified information',
             readFailed:
                 'Reading failed. The last known information is retained.',
             retryRead: 'Refresh',
@@ -122,7 +118,7 @@ export const catalogMessages = {
                 'Actual availability, lending, total changes, archiving and images will be connected in later steps.',
             totalNotice:
                 'This is the recorded total. It does not represent availability for lending.',
-            stale: 'The displayed information has not been checked again yet.',
+            stale: 'Updates are delayed. The last known information is still displayed; refresh to check it.',
             conflict:
                 'This equipment changed elsewhere. Your input and its original version are retained.',
             loadCurrent: 'Use the current values',

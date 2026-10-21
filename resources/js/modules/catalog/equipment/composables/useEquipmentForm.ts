@@ -9,6 +9,7 @@ import {
     type Ref,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { toast } from 'vue-sonner';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import { store, update } from '@/routes/catalog';
 import { fieldError } from '@/shared/i18n/fieldError';
@@ -16,7 +17,6 @@ import type { EquipmentData } from '@/types/generated/types/App/Modules/Catalog/
 import type { CommandReceipt } from '@/types/generated/types/App/Infrastructure/Operations';
 import { isReceipt } from '../contracts/decoders';
 import { usePendingOperations } from './usePendingOperations';
-import { useActivityIndicator } from './useActivityIndicator';
 
 type Body = Record<string, string | number | null>;
 export function useEquipmentForm(
@@ -46,7 +46,7 @@ export function useEquipmentForm(
     const preparing = ref(false);
     const preparationFailed = ref(false);
     const submitting = computed(() => form.processing || preparing.value);
-    const activity = useActivityIndicator(submitting);
+    const sendingFrom = ref<'submit' | 'resume'>('submit');
     const resumable = ref(false);
     let disposed = false;
     const intention = shallowRef<{ key: string; body: Body } | null>(null);
@@ -94,6 +94,10 @@ export function useEquipmentForm(
         pending.finish(value);
         consumedReceipt = value.operationKey;
         saved.value = true;
+        toast.success(composer.t('catalog.saved'), {
+            id: 'catalog-save',
+            duration: 5000,
+        });
         resumable.value = false;
         intention.value = null;
         if (unchanged) {
@@ -134,6 +138,7 @@ export function useEquipmentForm(
             return;
         }
         const body = { ...intention.value.body };
+        toast.dismiss('catalog-save');
         pending.markSending(key);
         resumable.value = false;
         saved.value = false;
@@ -186,6 +191,7 @@ export function useEquipmentForm(
         )
             return;
         preparing.value = true;
+        sendingFrom.value = 'submit';
         preparationFailed.value = false;
         try {
             const body: Body = {
@@ -226,10 +232,12 @@ export function useEquipmentForm(
         }
     }
     function resume() {
-        if (resumable.value) send();
+        if (resumable.value && !submitting.value) {
+            sendingFrom.value = 'resume';
+            send();
+        }
     }
     const release = access.own(() => {
-        activity.dispose();
         intention.value = null;
         form.resetAndClearErrors();
     });
@@ -262,7 +270,7 @@ export function useEquipmentForm(
         preparing,
         preparationFailed,
         submitting,
-        saving: activity.visible,
+        sendingFrom,
         resumable,
         divergence,
         error,

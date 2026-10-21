@@ -68,9 +68,13 @@ function fixture() {
     disposeTransport = () => transport.dispose();
     const filter = ref('first');
     const replies: ((value: string) => void)[] = [];
+    const failures: ((error: Error) => void)[] = [];
     const read = vi.fn((signal: AbortSignal) => {
         expect(signal).toBeInstanceOf(AbortSignal);
-        return new Promise<string>((resolve) => replies.push(resolve));
+        return new Promise<string>((resolve, reject) => {
+            replies.push(resolve);
+            failures.push(reject);
+        });
     });
     let projection!: ReturnType<typeof useCatalogProjection<string>>;
     wrapper = mount(
@@ -103,6 +107,7 @@ function fixture() {
         filter,
         read,
         replies,
+        failures,
         invalidate,
         confirm: () => confirm(),
         get projection() {
@@ -143,9 +148,101 @@ it('recovers without a notification within the visible polling window', async ()
     state.replies[0]('first');
     await vi.advanceTimersByTimeAsync(15_000);
     expect(state.read).toHaveBeenCalledTimes(2);
+    expect(state.projection.verifying.value).toBe(false);
+    expect(state.projection.manualRefreshing.value).toBe(false);
     state.replies[1]('last signal lost');
     await vi.advanceTimersByTimeAsync(0);
     expect(state.projection.data.value).toBe('last signal lost');
+});
+it('keeps an initial recovery distinct from a genuinely expired projection', async () => {
+    const state = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.projection.verifying.value).toBe(true);
+    expect(state.projection.expired.value).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(state.projection.data.value).toBe('initial');
+    expect(state.projection.expired.value).toBe(true);
+    expect(state.projection.verifying.value).toBe(false);
+
+    state.replies[0]('verified');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.projection.data.value).toBe('verified');
+    expect(state.projection.expired.value).toBe(false);
+});
+it('keeps last known information and warns when a periodic recovery exceeds freshness', async () => {
+    const state = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    state.replies[0]('known');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(state.projection.busy.value).toBe(true);
+    expect(state.projection.data.value).toBe('known');
+    expect(state.projection.expired.value).toBe(true);
+    expect(state.projection.manualRefreshing.value).toBe(false);
+
+    state.replies[1]('recovered');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.projection.data.value).toBe('recovered');
+    expect(state.projection.expired.value).toBe(false);
+});
+it('tracks a requested refresh through an older read without presenting automatic reads as user actions', async () => {
+    const state = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    state.projection.refresh();
+    expect(state.projection.manualRefreshing.value).toBe(true);
+    state.replies[0]('before request');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(state.projection.data.value).toBe('initial');
+    expect(state.projection.manualRefreshing.value).toBe(true);
+
+    state.replies[1]('requested');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.projection.data.value).toBe('requested');
+    expect(state.projection.manualRefreshing.value).toBe(false);
+});
+it('ends a failed manual refresh and discards its late response when access ends', async () => {
+    const state = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    state.replies[0]('known');
+    await vi.advanceTimersByTimeAsync(0);
+    state.projection.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    state.failures[1](new Error('unreachable'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.projection.failed.value).toBe(true);
+    expect(state.projection.data.value).toBe('known');
+    expect(state.projection.manualRefreshing.value).toBe(false);
+
+    state.projection.refresh();
+    await vi.advanceTimersByTimeAsync(100);
+    state.access.invalidate();
+    expect(state.projection.manualRefreshing.value).toBe(false);
+    state.replies[2]('old context');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.projection.data.value).toBe('known');
+});
+it('starts an explicit retry immediately instead of waiting for the automatic backoff', async () => {
+    const state = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    state.replies[0]('known');
+    await vi.advanceTimersByTimeAsync(0);
+    state.projection.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    for (const index of [1, 2, 3]) {
+        state.failures[index](new Error('unreachable'));
+        await vi.advanceTimersByTimeAsync(index < 3 ? 100 : 0);
+    }
+    expect(state.read).toHaveBeenCalledTimes(4);
+
+    state.projection.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.read).toHaveBeenCalledTimes(5);
+    expect(state.projection.manualRefreshing.value).toBe(true);
+    state.replies[4]('manual retry');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.projection.data.value).toBe('manual retry');
+    expect(state.projection.failed.value).toBe(false);
+    expect(state.projection.manualRefreshing.value).toBe(false);
 });
 it('refuses an overflowed snapshot and discards a response after access ends', async () => {
     const state = fixture();

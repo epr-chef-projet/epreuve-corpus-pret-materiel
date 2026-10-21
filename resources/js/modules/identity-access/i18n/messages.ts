@@ -2,6 +2,7 @@ export const identityMessages = {
     fr: {
         identity: {
             signIn: 'Se connecter',
+            signingIn: 'Connexion en cours…',
             signInTitle: 'Connexion à votre atelier',
             signInDescription:
                 'Utilisez votre identifiant et votre mot de passe précréés.',
@@ -33,6 +34,7 @@ export const identityMessages = {
     en: {
         identity: {
             signIn: 'Sign in',
+            signingIn: 'Signing in…',
             signInTitle: 'Sign in to your workshop',
             signInDescription: 'Use your precreated account and password.',
             login: 'Account ID',

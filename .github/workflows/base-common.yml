@@ -512,21 +512,30 @@ jobs:
               id: scan
               timeout-minutes: 10
               run: |
-                  curl -fsSL 'https://www.php.net/releases/index.php?json&version=8.5' -o "$RUNNER_TEMP/image-proof/php-official.json"
-                  curl -fsSL https://pecl.php.net/rest/r/redis/stable.txt -o "$RUNNER_TEMP/image-proof/redis-official.txt"
-                  curl -fsSL https://pecl.php.net/rest/r/imagick/stable.txt -o "$RUNNER_TEMP/image-proof/imagick-official.txt"
+                  publication_fetch=(curl -fsSL --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 30)
+                  "${publication_fetch[@]}" 'https://www.php.net/releases/index.php?json&version=8.5' -o "$RUNNER_TEMP/image-proof/php-official.json"
+                  "${publication_fetch[@]}" https://pecl.php.net/rest/r/redis/stable.txt -o "$RUNNER_TEMP/image-proof/redis-official.txt"
+                  "${publication_fetch[@]}" https://pecl.php.net/rest/r/imagick/stable.txt -o "$RUNNER_TEMP/image-proof/imagick-official.txt"
                   php_release=$(python3 -c 'import json, os, re; from pathlib import Path; version = json.loads((Path(os.environ["RUNNER_TEMP"]) / "image-proof/php-official.json").read_text())["version"]; assert re.fullmatch(r"8\.5\.[0-9]+", version); print(version.replace(".", "_"))')
-                  curl -fsSL "https://www.php.net/releases/$php_release.php" -o "$RUNNER_TEMP/image-proof/php-publication.html"
-                  curl -fsSL https://pecl.php.net/package-changelog.php?package=redis -o "$RUNNER_TEMP/image-proof/redis-publication.html"
-                  curl -fsSL https://pecl.php.net/package-changelog.php?package=imagick -o "$RUNNER_TEMP/image-proof/imagick-publication.html"
+                  "${publication_fetch[@]}" "https://www.php.net/releases/$php_release.php" -o "$RUNNER_TEMP/image-proof/php-publication.html"
+                  for extension in redis imagick; do
+                    release=$(python3 -c 'import os, re, sys; from pathlib import Path; version = (Path(os.environ["RUNNER_TEMP"]) / "image-proof" / (sys.argv[1] + "-official.txt")).read_text().strip(); assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version); print(version)' "$extension")
+                    "${publication_fetch[@]}" "https://pecl.php.net/rest/r/$extension/$release.xml" -o "$RUNNER_TEMP/image-proof/$extension-publication.xml"
+                  done
                   python3 - <<'PYTHON'
-                  import json, os
+                  import json, os, xml.etree.ElementTree as ET
                   from pathlib import Path
                   p = Path(os.environ['RUNNER_TEMP']) / 'image-proof'
                   inventory = json.loads((p / 'php-inventory.json').read_text())
                   assert inventory['php'] == json.loads((p / 'php-official.json').read_text())['version']
+                  namespace = {'r': 'http://pear.php.net/dtd/rest.release'}
                   for name in ['redis', 'imagick']:
-                      assert inventory['extensions'][name] == (p / (name + '-official.txt')).read_text().strip()
+                      stable = (p / (name + '-official.txt')).read_text().strip()
+                      assert inventory['extensions'][name] == stable
+                      release = ET.parse(p / (name + '-publication.xml')).getroot()
+                      for field, expected in [('p', name), ('c', 'pecl.php.net'), ('v', stable), ('st', 'stable')]:
+                          assert release.findtext('r:' + field, namespaces=namespace) == expected
+                      assert release.findtext('r:da', namespaces=namespace)
                   PYTHON
                   scanner=aquasec/trivy:0.75.0@sha256:9db099105405c648166e6b94155eb32f8da12673cf1f455207f7385cc9a77283
                   docker pull "$scanner"

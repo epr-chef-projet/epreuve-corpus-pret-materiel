@@ -32,7 +32,7 @@ return new class extends Migration
 ALTER TABLE epr.operation_receipts
     ADD CONSTRAINT operation_receipts_version_check CHECK (result_version BETWEEN 1 AND 2147483647),
     ADD CONSTRAINT operation_receipts_hash_check CHECK (input_sha256 ~ '^[0-9a-f]{64}$'),
-    ADD CONSTRAINT operation_receipts_type_check CHECK (operation_type IN ('catalog.equipment.create', 'catalog.equipment.update_text')),
+    ADD CONSTRAINT operation_receipts_type_check CHECK (operation_type IN ('catalog.equipment.create', 'catalog.equipment.update_text', 'catalog.equipment.archive', 'catalog.equipment.reactivate')),
     ADD CONSTRAINT operation_receipts_resource_check CHECK (resource_type = 'equipment' AND equipment_id IS NOT NULL AND resource_id = equipment_id);
 ALTER TABLE epr.operation_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE epr.operation_receipts FORCE ROW LEVEL SECURITY;

@@ -80,6 +80,13 @@ export function useEquipmentForm(
     }
     function consumeReceipt(value: unknown) {
         if (!current() || !pending.ready.value || !isReceipt(value)) return;
+        if (
+            ![
+                'catalog.equipment.create',
+                'catalog.equipment.update_text',
+            ].includes(value.operationType)
+        )
+            return;
         if (value.operationKey === consumedReceipt) return;
         if (equipment.value && value.resourceId !== equipment.value.equipmentId)
             return;
@@ -95,7 +102,7 @@ export function useEquipmentForm(
         consumedReceipt = value.operationKey;
         saved.value = true;
         toast.success(composer.t('catalog.saved'), {
-            id: 'catalog-save',
+            id: 'catalog-save-' + value.operationKey,
             duration: 5000,
         });
         resumable.value = false;
@@ -138,7 +145,7 @@ export function useEquipmentForm(
             return;
         }
         const body = { ...intention.value.body };
-        toast.dismiss('catalog-save');
+        if (consumedReceipt) toast.dismiss('catalog-save-' + consumedReceipt);
         pending.markSending(key);
         resumable.value = false;
         saved.value = false;

@@ -1,10 +1,10 @@
 # Transactions, états et répétitions
 
-**Version 1.1 — spécification technique.** [Index technique](README.md). Références produit : [engagements](../fonctionnel/catalogue-et-disponibilite.md), [transitions et historique](../fonctionnel/demandes-et-prets.md), [conflits et résultat incertain](../fonctionnel/cadre-et-acces.md#synchronisation). Le [schéma](donnees-securite.md) et les [contrats](../../interne/architecture/contrats-et-lots.md) possèdent leurs détails.
+**Version 1.2 - spécification technique.** [Index technique](README.md). Références produit : [engagements](../fonctionnel/catalogue-et-disponibilite.md), [transitions et historique](../fonctionnel/demandes-et-prets.md), [conflits et résultat incertain](../fonctionnel/cadre-et-acces.md#synchronisation). Le [schéma](donnees-securite.md) et les [contrats](../../interne/architecture/contrats-et-lots.md) possèdent leurs détails.
 
 <a id="epr-t-030"></a>
 
-## EPR-T-030 — Connexion et unité propriétaire
+## EPR-T-030 - Connexion et unité propriétaire
 
 Les mutations utilisent la connexion PostgreSQL primaire du rôle applicatif, en `READ COMMITTED`. L'action propriétaire ouvre l'unité, installe le contexte d'accès fiable avant tout SQL protégé, puis appelle services et repositories. Les participants Catalog/Lending utilisent cette même connexion ; un retour de méthode ou savepoint n'est pas un commit extérieur. Une mauvaise connexion, l'absence de transaction ou un contexte imbriqué d'un autre atelier provoque un échec avant l'accès.
 
@@ -12,7 +12,7 @@ Les compositions de lecture qui exigent un instantané commun choisissent explic
 
 <a id="epr-t-031"></a>
 
-## EPR-T-031 — Ordre commun de protection
+## EPR-T-031 - Ordre commun de protection
 
 Après coordination de l'identité d'opération, une commande visant une demande verrouille d'abord cette demande, puis les références nécessaires, triées par UUID croissant. Le remplacement prend l'union des anciennes et nouvelles références : jusqu'à 200 identifiants pour deux ensembles de 100. Aucun parcours ne verrouille un équipement puis une demande. Changement du total, archivage et traitements d'images ne verrouillent pas de demande.
 
@@ -20,7 +20,7 @@ Les lignes `equipment` existantes sont la ressource commune protégée avant les
 
 <a id="epr-t-032"></a>
 
-## EPR-T-032 — Atomicité et état acquis
+## EPR-T-032 - Atomicité et état acquis
 
 État de demande, lignes, historique prévu par le cycle confirmé, preuve d'opération et messages/obligations durables nécessaires sont validés dans une seule unité SQL. Un refus après écriture partielle annule l'ensemble. L'erreur sort de la fermeture transactionnelle avant adaptation ; un résultat d'échec capturé dedans ne doit pas permettre un commit partiel.
 
@@ -28,7 +28,7 @@ Les engagements sont dérivés des lignes et états acquis, sans compteur autono
 
 <a id="epr-t-033"></a>
 
-## EPR-T-033 — Brouillon et première confirmation
+## EPR-T-033 - Brouillon et première confirmation
 
 Un brouillon appartient à son auteur ; l'équipe n'y accède pas. Enregistrer, reprendre et supprimer ne créent ni engagement ni historique de prêt confirmé. Les lignes déjà enregistrées peuvent devenir indisponibles sans être perdues ; une nouvelle référence épuisée ou archivée n'est pas ajoutable. Un brouillon vide est enregistrable.
 
@@ -36,7 +36,7 @@ Confirmer exige une demande non vide, version attendue et lignes admissibles de 
 
 <a id="epr-t-034"></a>
 
-## EPR-T-034 — Remplacement complet
+## EPR-T-034 - Remplacement complet
 
 Seul l'auteur remplace les lignes à l'état `pending`, avec sa version attendue. Pour chaque référence, le minimum disponible pour sa proposition est calculé en excluant son ancien engagement : quantité proposée ≤ total − engagements des autres demandes. Cette exclusion vient de la demande protégée, jamais d'une quantité annoncée par le client.
 
@@ -44,7 +44,7 @@ Les lignes existantes gardent leur descriptif historique ; une référence nouve
 
 <a id="epr-t-035"></a>
 
-## EPR-T-035 — Décisions de l'équipe et actions physiques
+## EPR-T-035 - Décisions de l'équipe et actions physiques
 
 Toutes les commandes portent la version relue du récapitulatif ; une modification concurrente impose une nouvelle lecture avant acceptation. Acceptation garde l'engagement et capture l'instantané immuable du bon, avec obligation durable de préparation. Refus et annulation autorisés libèrent l'ensemble ; le motif d'équipe est obligatoire.
 
@@ -52,15 +52,15 @@ Remise transforme réservé en remis sans libération ni double décompte. Retou
 
 <a id="epr-t-036"></a>
 
-## EPR-T-036 — Catalogue et quantité totale
+## EPR-T-036 - Catalogue et quantité totale
 
 WorkshopOperations possède le changement du total : autoriser le responsable, protéger la référence Catalog et sa version, lire les engagements Lending, puis décider total proposé ≥ réservés + remis. Catalog enregistre le total par son contrat participant, avec le minimum protégé fourni par l'orchestrateur. Aucun module ne modifie les tables du voisin ; Catalog ne consulte pas Lending.
 
-Archivage/réactivation utilisent la même protection de référence. Une confirmation concurrente voit donc l'un des deux états acquis, sans engagement d'une référence déjà archivée lors de sa décision. Archiver n'annule aucun prêt et n'empêche pas les transitions sur ses lignes confirmées. Tous les changements pertinents d'une référence font évoluer sa version ; les engagements évoluent sous la version de demande, pas sous une prétendue version de disponibilité Catalog.
+Archivage/réactivation utilisent la même protection de référence. Une confirmation concurrente voit donc l'un des deux états acquis, sans engagement d'une référence déjà archivée lors de sa décision. Archiver n'annule aucun prêt et n'empêche pas les transitions sur ses lignes confirmées. Une nouvelle intention demandant un état déjà atteint vérifie d'abord la version attendue, puis confirme par reçu sans mutation, incrément ni invalidation. Une version périmée reste un conflit. Tous les changements pertinents d'une référence font évoluer sa version ; les engagements évoluent sous la version de demande, pas sous une prétendue version de disponibilité Catalog.
 
 <a id="epr-t-037"></a>
 
-## EPR-T-037 — Identité d'opération durable
+## EPR-T-037 - Identité d'opération durable
 
 La portée est atelier, acteur, type de commande et `operationKey` UUID. Une empreinte du contenu canonique comprend ressource, valeurs normalisées, lignes triées sémantiquement et version attendue. Une même charge utile avec une nouvelle clé est une nouvelle intention. Acquérir la clé, appliquer la mutation et conserver son résultat minimal réussissent ensemble ; une unicité effective arbitre les appels concurrents.
 
@@ -68,7 +68,7 @@ Même clé/contenu : restituer la preuve acquise après droits courants, sans re
 
 <a id="epr-t-038"></a>
 
-## EPR-T-038 — Échec, limites et suites
+## EPR-T-038 - Échec, limites et suites
 
 Configurer localement `lock_timeout` à 2 s et `statement_timeout` à 5 s pour les unités concernées. Au maximum trois tentatives complètes sont admises après deadlock ou échec de sérialisation reconnu avec rollback certain ; attente cumulée entre tentatives ≤250 ms et durée totale ≤15 s. La dernière tentative respecte le temps restant. Ces objectifs sont à qualifier, sans présumer la reconnaissance exacte des erreurs par Laravel.
 
@@ -76,7 +76,7 @@ Ne pas rejouer automatiquement conflit métier/version, attente expirée ou comm
 
 <a id="epr-t-039"></a>
 
-## EPR-T-039 — Preuves à produire
+## EPR-T-039 - Preuves à produire
 
 Exercer PostgreSQL avec deux connexions indépendantes, rôle applicatif et contextes réels. Des barrières observables et délais bornés contrôlent les deux ordres des courses : dernière unité, réduction du total/confirmation, archivage/confirmation, modification/acceptation, annulation/remise. Vérifier persistance, absence d'effet partiel et issue présentée.
 

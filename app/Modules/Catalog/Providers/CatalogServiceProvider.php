@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Catalog\Providers;
 
 use App\Modules\Catalog\Equipment\Http\CatalogIssueMapper;
+use App\Modules\Catalog\Equipment\UseCases\PrepareDemo\PrepareCatalogDemo;
 use Illuminate\Foundation\Exceptions\Handler;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\ServiceProvider;
@@ -21,6 +22,9 @@ final class CatalogServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        if ($this->app->runningInConsole()) {
+            $this->commands([PrepareCatalogDemo::class]);
+        }
         foreach (['fr', 'en'] as $locale) {
             Lang::addLines(require __DIR__.'/../Equipment/Lang/'.$locale.'.php', $locale);
         }

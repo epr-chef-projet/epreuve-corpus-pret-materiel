@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\Equipment\UseCases\SaveEquipment;
 
+use App\Modules\Catalog\Equipment\UseCases\ChangeEquipmentState\ChangeEquipmentStateAction;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\EditEquipmentText\EditEquipmentTextAction;
 use Illuminate\Support\Facades\Validator;
@@ -60,6 +61,20 @@ final class EquipmentInputFactory
     }
 
     /** @param array<string, mixed> $data
+     * @return array{operationKey: string, expectedVersion: int}
+     */
+    public function state(array $data): array
+    {
+        if (array_diff(array_keys($data), ['expectedVersion', 'operationKey', '_token']) !== []) {
+            throw ValidationException::withMessages(['catalog' => __('catalog.validation.unknown_fields')]);
+        }
+        $data['expectedVersion'] = self::integer($data['expectedVersion'] ?? null);
+        $valid = Validator::make($data, ['expectedVersion' => ['required', 'integer:strict', 'between:1,2147483647'], 'operationKey' => ['required', 'uuid', self::UUID]])->validate();
+
+        return ['operationKey' => $valid['operationKey'], 'expectedVersion' => $valid['expectedVersion']];
+    }
+
+    /** @param array<string, mixed> $data
      * @return array{operationType: string, operationKey: string}
      */
     public function operation(array $data): array
@@ -67,7 +82,7 @@ final class EquipmentInputFactory
         if (array_diff(array_keys($data), ['operationType', 'operationKey']) !== []) {
             throw ValidationException::withMessages(['catalog' => __('catalog.validation.unknown_fields')]);
         }
-        $valid = Validator::make($data, ['operationType' => ['required', 'in:'.CreateEquipmentAction::OPERATION.','.EditEquipmentTextAction::OPERATION], 'operationKey' => ['required', 'uuid', self::UUID]])->validate();
+        $valid = Validator::make($data, ['operationType' => ['required', 'in:'.CreateEquipmentAction::OPERATION.','.EditEquipmentTextAction::OPERATION.','.ChangeEquipmentStateAction::ARCHIVE.','.ChangeEquipmentStateAction::REACTIVATE], 'operationKey' => ['required', 'uuid', self::UUID]])->validate();
 
         return ['operationType' => $valid['operationType'], 'operationKey' => $valid['operationKey']];
     }

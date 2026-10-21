@@ -204,6 +204,10 @@ const explanation = computed(() =>
             @click="state.resume"
         />
         <PendingOperations
+            :operation-types="[
+                'catalog.equipment.create',
+                'catalog.equipment.update_text',
+            ]"
             :receipt="receipt"
             @absent="state.absent"
             @applied="applied"

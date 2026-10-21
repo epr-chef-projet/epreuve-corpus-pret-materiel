@@ -28,6 +28,8 @@ const instant = (value: unknown): value is string =>
 export const operationTypes = [
     'catalog.equipment.create',
     'catalog.equipment.update_text',
+    'catalog.equipment.archive',
+    'catalog.equipment.reactivate',
 ] as const;
 export type OperationType = (typeof operationTypes)[number];
 function equipmentFields(value: Record<string, unknown>): boolean {

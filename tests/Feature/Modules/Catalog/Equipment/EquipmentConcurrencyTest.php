@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Modules\Catalog\Equipment;
 
+use App\Modules\Catalog\Equipment\UseCases\ChangeEquipmentState\ChangeEquipmentStateAction;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\InvalidateCatalog\PublishCatalogInvalidation;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInput;
+use App\Modules\Catalog\PublicApi\LockEquipmentBatch;
+use App\Modules\Catalog\PublicApi\ReplaceTotalWithinUnit;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
 use Illuminate\Support\Facades\DB;
@@ -84,7 +87,7 @@ final class EquipmentConcurrencyTest extends TestCase
      * @param  array<string, mixed>  $second
      * @return array{array<string, mixed>, array<string, mixed>}
      */
-    private function race(array $first, array $second, string $pause): array
+    private function race(array $first, array $second, string $pause, bool $waitsForLock = true): array
     {
         $directory = storage_path('catalog-races/'.Str::uuid7());
         if (! mkdir($directory, 0700, true) && ! is_dir($directory)) {
@@ -97,7 +100,12 @@ final class EquipmentConcurrencyTest extends TestCase
         $this->waitFor(static fn (): bool => is_file($directory.'/b.pid') || ! $b->isRunning());
         $this->assertTrue($b->isRunning(), $b->getErrorOutput().$b->getOutput());
         $pid = (int) file_get_contents($directory.'/b.pid');
-        $this->waitFor(static fn (): bool => DB::selectOne('SELECT count(*) AS count FROM pg_locks WHERE pid=? AND NOT granted', [$pid])->count > 0);
+        if ($waitsForLock) {
+            $this->waitFor(static fn (): bool => DB::selectOne('SELECT count(*) AS count FROM pg_locks WHERE pid=? AND NOT granted', [$pid])->count > 0);
+        } else {
+            $this->waitFor(static fn (): bool => $b->getStatus() === Process::STATUS_TERMINATED);
+            $this->assertSame(0, $b->getExitCode(), $b->getErrorOutput().$b->getOutput());
+        }
         file_put_contents($directory.'/release', 'release');
         $a->wait();
         $b->wait();
@@ -182,6 +190,126 @@ final class EquipmentConcurrencyTest extends TestCase
         } finally {
             $redis->del($queue, $queue.':notify');
         }
+    }
+
+    public function test_archive_and_edit_serialize_in_both_orders_without_silently_overwriting_the_other(): void
+    {
+        Queue::fake([PublishCatalogInvalidation::class]);
+        foreach ([['archive', 'edit'], ['edit', 'archive']] as [$first, $second]) {
+            $created = app(CreateEquipmentAction::class)->handle($this->actor(), new EquipmentInput('__a04_race_initial', 'A04 race fixture', null), 5, $this->key());
+            [$a, $b] = $this->race(['action' => $first, 'operationKey' => $this->key(), 'equipmentId' => $created->resourceId, 'name' => '__a04_edited'], ['action' => $second, 'operationKey' => $this->key(), 'equipmentId' => $created->resourceId, 'name' => '__a04_later'], 'equipment');
+            $this->assertSame(2, $a['receipt']['resultVersion']);
+            $this->assertSame('catalog.content_conflict', $b['errorCode']);
+            app(SqlUnit::class)->forActorRead($this->actor(), function () use ($created, $first): void {
+                $this->assertDatabaseHas('catalog_equipment', ['id' => $created->resourceId, 'version' => 2, 'is_active' => $first !== 'archive', 'total_quantity' => 5, 'name' => $first === 'archive' ? '__a04_race_initial' : '__a04_edited']);
+            });
+        }
+    }
+
+    public function test_archive_and_participant_protection_share_the_same_lock_and_reread_after_waiting_in_both_orders(): void
+    {
+        Queue::fake([PublishCatalogInvalidation::class]);
+        foreach ([['archive', 'lock'], ['lock', 'archive']] as [$first, $second]) {
+            $created = app(CreateEquipmentAction::class)->handle($this->actor(), new EquipmentInput('__a04_lock_initial', 'A04 race fixture', null), 1, $this->key());
+            [$a, $b] = $this->race(['action' => $first, 'operationKey' => $this->key(), 'equipmentId' => $created->resourceId], ['action' => $second, 'operationKey' => $this->key(), 'equipmentId' => $created->resourceId], 'equipment');
+            $state = $first === 'lock' ? $a['states'][0] : $b['states'][0];
+            $this->assertSame($first === 'lock' ? 'active' : 'archived', $state['status']);
+            $this->assertSame($first === 'lock' ? 1 : 2, $state['equipmentVersion']);
+            app(SqlUnit::class)->forActorRead($this->actor(), function () use ($created): void {
+                $this->assertDatabaseHas('catalog_equipment', ['id' => $created->resourceId, 'version' => 2, 'is_active' => false]);
+            });
+        }
+    }
+
+    public function test_simultaneous_same_archive_intention_has_only_one_effect_and_replays_the_receipt(): void
+    {
+        Queue::fake([PublishCatalogInvalidation::class]);
+        $created = app(CreateEquipmentAction::class)->handle($this->actor(), new EquipmentInput('__a04_same_archive', 'A04 race fixture', null), 1, $this->key());
+        $key = $this->key();
+        $input = ['action' => 'archive', 'operationKey' => $key, 'equipmentId' => $created->resourceId];
+        [$a, $b] = $this->race($input, $input, 'intention');
+        $this->assertSame(2, $a['receipt']['resultVersion']);
+        $this->assertFalse($a['receipt']['replayed']);
+        $this->assertTrue($b['receipt']['replayed']);
+        $this->assertSame($a['receipt']['recordedAt'], $b['receipt']['recordedAt']);
+        app(SqlUnit::class)->forActorRead($this->actor(), function () use ($key): void {
+            $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $key)->count());
+        });
+    }
+
+    public function test_archive_and_total_notifications_reach_native_redis_only_after_outer_commit_and_never_after_rollback(): void
+    {
+        $prefix = 'epr_testing_a04_'.Str::uuid7().'_';
+        config(['database.redis.catalog_proof' => [...config('database.redis.default'), 'options' => ['prefix' => $prefix]], 'queue.connections.redis.connection' => 'catalog_proof']);
+        $redis = Redis::connection('catalog_proof');
+        $queue = 'queues:testing-notifications';
+        $actor = $this->actor();
+        $created = app(CreateEquipmentAction::class)->handle($actor, new EquipmentInput('__a04_publication', 'A04 race fixture', null), 5, $this->key());
+        $redis->del($queue, $queue.':notify');
+        $archiveKey = $this->key();
+        $rollback = new \RuntimeException('A04 controlled rollback');
+        try {
+            try {
+                app(SqlUnit::class)->forActor($actor, function () use ($actor, $created, $archiveKey, $rollback, $redis, $queue): void {
+                    app(LockEquipmentBatch::class)->handle($actor, [$created->resourceId]);
+                    $this->assertSame(2, app(ReplaceTotalWithinUnit::class)->handle($actor, $created->resourceId, 3, 1, 3));
+                    app(ChangeEquipmentStateAction::class)->handle($actor, $created->resourceId, ChangeEquipmentStateAction::ARCHIVE, 2, $archiveKey);
+                    $this->assertSame(0, $redis->llen($queue));
+                    throw $rollback;
+                });
+            } catch (\RuntimeException $error) {
+                if ($error !== $rollback) {
+                    throw $error;
+                }
+            }
+            $this->assertSame(0, $redis->llen($queue));
+            app(SqlUnit::class)->forActor($actor, function () use ($actor, $created, $archiveKey, $redis, $queue): void {
+                $this->assertDatabaseHas('catalog_equipment', ['id' => $created->resourceId, 'version' => 1, 'total_quantity' => 5, 'is_active' => true]);
+                $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $archiveKey]);
+                expect(fn () => app(ReplaceTotalWithinUnit::class)->handle($actor, $created->resourceId, 3, 1, 0))->toThrow(\LogicException::class);
+                app(LockEquipmentBatch::class)->handle($actor, [$created->resourceId]);
+                app(ReplaceTotalWithinUnit::class)->handle($actor, $created->resourceId, 3, 1, 3);
+                app(ChangeEquipmentStateAction::class)->handle($actor, $created->resourceId, ChangeEquipmentStateAction::ARCHIVE, 2, $archiveKey);
+                $this->assertSame(0, $redis->llen($queue));
+            });
+            $this->assertSame(2, $redis->llen($queue));
+            app(ChangeEquipmentStateAction::class)->handle($actor, $created->resourceId, ChangeEquipmentStateAction::ARCHIVE, 3, $this->key());
+            $payloads = $redis->lrange($queue, 0, -1);
+            $this->assertIsArray($payloads);
+            $this->assertCount(2, $payloads);
+            app(SqlUnit::class)->forActor($actor, function () use ($actor, $created): void {
+                expect(fn () => app(ReplaceTotalWithinUnit::class)->handle($actor, $created->resourceId, 3, 3, 0))->toThrow(\LogicException::class);
+            });
+        } finally {
+            $redis->del($queue, $queue.':notify');
+        }
+    }
+
+    public function test_releasing_a_savepoint_retains_the_row_lock_and_rolling_it_back_releases_the_row_lock_and_trace(): void
+    {
+        Queue::fake([PublishCatalogInvalidation::class]);
+        foreach (['lockRelease', 'lockRollback'] as $first) {
+            $created = app(CreateEquipmentAction::class)->handle($this->actor(), new EquipmentInput('__a04_savepoint', 'A04 race fixture', null), 1, $this->key());
+            [$a, $b] = $this->race(['action' => $first, 'equipmentId' => $created->resourceId], ['action' => 'archive', 'equipmentId' => $created->resourceId, 'operationKey' => $this->key()], 'savepoint', $first === 'lockRelease');
+            $this->assertSame('active', $a['states'][0]['status']);
+            $this->assertSame(2, $b['receipt']['resultVersion']);
+            app(SqlUnit::class)->forActorRead($this->actor(), function () use ($created): void {
+                $this->assertDatabaseHas('catalog_equipment', ['id' => $created->resourceId, 'version' => 2, 'is_active' => false]);
+            });
+        }
+    }
+
+    public function test_opposite_batch_input_orders_share_the_same_global_uuid_lock_order(): void
+    {
+        Queue::fake([PublishCatalogInvalidation::class]);
+        $ids = [];
+        foreach (['first', 'second'] as $suffix) {
+            $ids[] = app(CreateEquipmentAction::class)->handle($this->actor(), new EquipmentInput('__a04_batch_'.$suffix, 'A04 race fixture', null), 1, $this->key())->resourceId;
+        }
+        sort($ids, SORT_STRING);
+        [$a, $b] = $this->race(['action' => 'lock', 'equipmentIds' => array_reverse($ids)], ['action' => 'lock', 'equipmentIds' => $ids], 'equipment');
+        $this->assertSame($ids, array_column($a['states'], 'equipmentId'));
+        $this->assertSame($ids, array_column($b['states'], 'equipmentId'));
     }
 
     private function cleanupRecipe(): void

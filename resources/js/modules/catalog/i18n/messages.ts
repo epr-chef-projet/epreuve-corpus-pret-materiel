@@ -33,14 +33,26 @@ export const catalogMessages = {
             active: 'Actif',
             archived: 'Archivé',
             state: 'État',
+            stateActions: 'Mise en service du matériel',
+            archive: 'Archiver ce matériel',
+            reactivate: 'Réactiver ce matériel',
+            archiveTitle: 'Archiver ce matériel ?',
+            archiveDescription:
+                'Il ne sera plus proposé pour de nouveaux choix. Sa fiche et les demandes existantes seront conservées.',
+            archiveConfirm: 'Confirmer l’archivage',
+            archiveDone: 'Archivage confirmé.',
+            reactivateDone: 'Réactivation confirmée.',
+            stateSaving: 'Modification de l’état en cours…',
+            resumeState: 'Reprendre la même modification d’état',
+            cancel: 'Annuler',
             noImage: 'Aucune image',
             partial:
-                'Disponibilité réelle, prêts, modification du total, archivage et images seront raccordés lors des prochaines étapes.',
+                'Disponibilité réelle, prêts, modification du total et images seront raccordés lors des prochaines étapes.',
             totalNotice:
                 'Cette quantité est le total recensé. Elle ne représente pas la disponibilité au prêt.',
             stale: 'La mise à jour prend du retard. Les dernières informations connues restent affichées ; actualise pour les vérifier.',
             conflict:
-                'La fiche a changé ailleurs. Ta saisie est conservée avec sa version de départ.',
+                'La fiche a changé depuis le début de ta saisie. Ta saisie est conservée avec sa version de départ.',
             loadCurrent: 'Reprendre les valeurs actuelles',
             currentValues: 'Valeurs actuellement enregistrées',
             dirtyNotice:
@@ -113,14 +125,26 @@ export const catalogMessages = {
             active: 'Active',
             archived: 'Archived',
             state: 'Status',
+            stateActions: 'Equipment service status',
+            archive: 'Archive this equipment',
+            reactivate: 'Reactivate this equipment',
+            archiveTitle: 'Archive this equipment?',
+            archiveDescription:
+                'It will no longer be offered for new selections. Its details and existing requests will be retained.',
+            archiveConfirm: 'Confirm archiving',
+            archiveDone: 'Archiving confirmed.',
+            reactivateDone: 'Reactivation confirmed.',
+            stateSaving: 'Changing status…',
+            resumeState: 'Resume the same status change',
+            cancel: 'Cancel',
             noImage: 'No image',
             partial:
-                'Actual availability, lending, total changes, archiving and images will be connected in later steps.',
+                'Actual availability, lending, total changes and images will be connected in later steps.',
             totalNotice:
                 'This is the recorded total. It does not represent availability for lending.',
             stale: 'Updates are delayed. The last known information is still displayed; refresh to check it.',
             conflict:
-                'This equipment changed elsewhere. Your input and its original version are retained.',
+                'This equipment changed since you started editing. Your input and its original version are retained.',
             loadCurrent: 'Use the current values',
             currentValues: 'Currently saved values',
             dirtyNotice:

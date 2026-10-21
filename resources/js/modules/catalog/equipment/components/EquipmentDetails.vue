@@ -10,6 +10,7 @@ import type { IssueData } from '@/types/generated/types/App/Shared/Errors';
 import { useCatalogProjection } from '../composables/useCatalogProjection';
 import { readEquipment } from '../requests/readEquipment';
 import EquipmentForm from './EquipmentForm.vue';
+import EquipmentStateForm from './EquipmentStateForm.vue';
 import EquipmentReadStatus from './EquipmentReadStatus.vue';
 const props = defineProps<{
     initialEquipment: EquipmentData;
@@ -98,6 +99,12 @@ const projection = useCatalogProjection(
             {{ t('catalog.totalNotice') }}
         </p>
         <p class="text-sm text-muted-foreground">{{ t('catalog.partial') }}</p>
+        <EquipmentStateForm
+            :key="initialEquipment.equipmentId"
+            :equipment="projection.data.value"
+            :receipt="receipt"
+            @verified="projection.recheck"
+        />
         <EquipmentForm
             :key="initialEquipment.equipmentId"
             :equipment="projection.data.value"

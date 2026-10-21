@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { computed, ref, watch, onScopeDispose } from 'vue';
+import { computed, ref, watch, onScopeDispose, useId } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { LoadingButton } from '@/components/ui/button';
 import { show } from '@/routes/catalog';
@@ -10,9 +10,17 @@ import {
     type PendingProof,
 } from '../composables/usePendingOperations';
 import { readOperation } from '../requests/readEquipment';
-import { isReceipt } from '../contracts/decoders';
+import { isReceipt, type OperationType } from '../contracts/decoders';
 import type { CommandReceipt } from '@/types/generated/types/App/Infrastructure/Operations';
-const props = defineProps<{ receipt?: CommandReceipt | null }>();
+const props = withDefaults(
+    defineProps<{
+        receipt?: CommandReceipt | null;
+        operationTypes?: readonly OperationType[];
+        showStorageNotice?: boolean;
+    }>(),
+    { receipt: undefined, operationTypes: undefined, showStorageNotice: true },
+);
+const titleId = useId();
 const emit = defineEmits<{
     applied: [key: string, receipt?: CommandReceipt];
     absent: [key: string];
@@ -22,9 +30,11 @@ const pending = usePendingOperations();
 const unresolved = computed(() =>
     pending.unresolved.value.filter(
         (proof) =>
-            !isReceipt(props.receipt) ||
-            props.receipt.operationKey !== proof.operationKey ||
-            props.receipt.operationType !== proof.operationType,
+            (!props.operationTypes ||
+                props.operationTypes.includes(proof.operationType)) &&
+            (!isReceipt(props.receipt) ||
+                props.receipt.operationKey !== proof.operationKey ||
+                props.receipt.operationType !== proof.operationType),
     ),
 );
 const access = useAccessStore();
@@ -45,6 +55,7 @@ async function check(proof: PendingProof) {
             proof.operationType,
             proof.operationKey,
             abort.signal,
+            proof.resourceId,
         );
         if (generation !== access.generation || abort.signal.aborted) return;
         if (result.status === 'applied' && result.receipt) {
@@ -79,15 +90,15 @@ onScopeDispose(() => controllers.forEach((controller) => controller.abort()));
         v-if="
             unresolved.length ||
             Object.keys(appliedLinks).length ||
-            pending.unavailable.value
+            (showStorageNotice && pending.unavailable.value)
         "
         class="flex flex-col gap-3 rounded-lg border p-4"
-        aria-labelledby="pending-title"
+        :aria-labelledby="titleId"
     >
-        <h2 id="pending-title" class="font-semibold">
+        <h2 :id="titleId" class="font-semibold">
             {{ t('catalog.pendingTitle') }}
         </h2>
-        <p v-if="pending.unavailable.value" role="status">
+        <p v-if="showStorageNotice && pending.unavailable.value" role="status">
             {{ t('catalog.storageLimit') }}
         </p>
         <ul class="flex flex-col gap-3">

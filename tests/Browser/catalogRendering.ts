@@ -147,8 +147,12 @@ export async function observeCatalogRendering(page: Page, selector: string) {
                     false,
                 conflict: visible.some(
                     (text) =>
-                        text.includes('La fiche a changé ailleurs') ||
-                        text.includes('This equipment changed elsewhere'),
+                        text.includes(
+                            'La fiche a changé depuis le début de ta saisie',
+                        ) ||
+                        text.includes(
+                            'This equipment changed since you started editing',
+                        ),
                 ),
                 refreshing: visible.some((text) =>
                     text.includes('Actualisation en cours'),

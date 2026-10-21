@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\Equipment\UseCases\SaveEquipment;
 
-use App\Modules\Catalog\Equipment\Errors\ContentConflict;
-use App\Modules\Catalog\Equipment\Errors\VersionExhausted;
 use App\Modules\Catalog\Equipment\Models\Equipment;
+use App\Modules\Catalog\PublicApi\Errors\ContentConflict;
+use App\Modules\Catalog\PublicApi\Errors\VersionExhausted;
 use InvalidArgumentException;
 
 final class EquipmentTextService

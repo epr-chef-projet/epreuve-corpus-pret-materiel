@@ -66,9 +66,17 @@ export const readOperation = (
     type: OperationType,
     key: string,
     signal: AbortSignal,
+    resourceId: string | null = null,
 ): Promise<OperationResultData> =>
     read(
         operation.url({ query: { operationType: type, operationKey: key } }),
-        isOperationResult,
+        (value: unknown): value is OperationResultData =>
+            isOperationResult(value) &&
+            (value.status === 'notEstablished' ||
+                (value.receipt !== null &&
+                    value.receipt.operationType === type &&
+                    value.receipt.operationKey === key &&
+                    (resourceId === null ||
+                        value.receipt.resourceId === resourceId))),
         signal,
     );

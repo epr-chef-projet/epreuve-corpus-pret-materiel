@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\Equipment\Http;
 
+use App\Modules\Catalog\Equipment\UseCases\ChangeEquipmentState\ChangeEquipmentStateAction;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\EditEquipmentText\EditEquipmentTextAction;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\EquipmentQueryFactory;
@@ -77,6 +78,25 @@ final class CatalogController
     public function page(Request $request, EquipmentQueryFactory $queries, ReadEquipmentPage $read): JsonResponse
     {
         return response()->json(ManagementPageData::fromPage($read->handle($this->actors->handle($request), $queries->management($request->query()))), options: JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)->header('Cache-Control', 'private, no-store');
+    }
+
+    public function archive(Request $request, string $equipment, EquipmentInputFactory $inputs, ChangeEquipmentStateAction $change): RedirectResponse
+    {
+        return $this->changeState($request, $equipment, $inputs, $change, ChangeEquipmentStateAction::ARCHIVE);
+    }
+
+    public function reactivate(Request $request, string $equipment, EquipmentInputFactory $inputs, ChangeEquipmentStateAction $change): RedirectResponse
+    {
+        return $this->changeState($request, $equipment, $inputs, $change, ChangeEquipmentStateAction::REACTIVATE);
+    }
+
+    private function changeState(Request $request, string $equipment, EquipmentInputFactory $inputs, ChangeEquipmentStateAction $change, string $operationType): RedirectResponse
+    {
+        $input = $inputs->state($request->all());
+        $request->attributes->set('operationKey', $input['operationKey']);
+        $receipt = $change->handle($this->actors->handle($request), $inputs->identifier($equipment), $operationType, $input['expectedVersion'], $input['operationKey']);
+
+        return to_route('catalog.show', ['equipment' => $receipt->resourceId])->with('catalogReceipt', json_encode($receipt, JSON_THROW_ON_ERROR));
     }
 
     public function detail(Request $request, string $equipment, EquipmentInputFactory $inputs, ReadEquipmentAction $read): JsonResponse

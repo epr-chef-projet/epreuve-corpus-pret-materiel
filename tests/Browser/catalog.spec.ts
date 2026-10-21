@@ -110,9 +110,19 @@ function expectButtonStable(renders: ButtonRender[]) {
     ).toBe(true);
 }
 
+async function expectSaveConfirmation(page: Page) {
+    const confirmation = page
+        .locator('[data-sonner-toast]:not([data-removed="true"])')
+        .getByText('Enregistrement confirmé.', { exact: true });
+    await expect(confirmation).toHaveCount(1);
+    await expect(confirmation).toBeVisible();
+}
+
 async function recoverAccess(page: Page) {
     try {
         await page
+            .getByRole('status')
+            .filter({ hasText: 'Connexion interrompue.' })
             .getByRole('button', { name: 'Vérifier mon accès', exact: true })
             .click({ timeout: 1500 });
     } catch (error) {
@@ -137,7 +147,7 @@ test.afterAll(() => {
         .join(',');
     writeFileSync(
         `.epr-local/catalog-browser-cleanup-${runId}.sql`,
-        `BEGIN;\nDO $guard$ BEGIN IF current_database()<>'testing' OR NOT EXISTS(SELECT FROM pg_roles WHERE rolname=session_user AND rolsuper) THEN RAISE EXCEPTION 'Testing cleanup target refused'; END IF; END $guard$;\nCREATE TEMP TABLE catalog_fixture_cleanup ON COMMIT DROP AS SELECT equipment_id FROM epr.operation_receipts WHERE (actor_id,operation_key) IN (${pairs}) AND operation_type='catalog.equipment.create';\nDELETE FROM epr.operation_receipts WHERE (actor_id,operation_key) IN (${pairs}) AND operation_type IN ('catalog.equipment.create','catalog.equipment.update_text');\nDELETE FROM epr.catalog_equipment WHERE id IN(SELECT equipment_id FROM catalog_fixture_cleanup);\nCOMMIT;\n`,
+        `BEGIN;\nDO $guard$ BEGIN IF current_database()<>'testing' OR NOT EXISTS(SELECT FROM pg_roles WHERE rolname=session_user AND rolsuper) THEN RAISE EXCEPTION 'Testing cleanup target refused'; END IF; END $guard$;\nCREATE TEMP TABLE catalog_fixture_cleanup ON COMMIT DROP AS SELECT equipment_id FROM epr.operation_receipts WHERE (actor_id,operation_key) IN (${pairs}) AND operation_type='catalog.equipment.create';\nDELETE FROM epr.operation_receipts WHERE (actor_id,operation_key) IN (${pairs}) AND operation_type IN ('catalog.equipment.create','catalog.equipment.update_text','catalog.equipment.archive','catalog.equipment.reactivate');\nDELETE FROM epr.catalog_equipment WHERE id IN(SELECT equipment_id FROM catalog_fixture_cleanup);\nCOMMIT;\n`,
         { mode: 0o600 },
     );
 });
@@ -316,9 +326,7 @@ test('catalog rendering does not present a normal save as an unknown result or m
             (render) => render.pending || render.conflict,
         ),
     ).toBe(false);
-    await expect(
-        page.getByText('Enregistrement confirmé.', { exact: true }),
-    ).toBeVisible();
+    await expectSaveConfirmation(page);
     for (const version of [1, 2]) {
         await page
             .getByLabel('Nom *', { exact: true })
@@ -337,9 +345,7 @@ test('catalog rendering does not present a normal save as an unknown result or m
                 exact: true,
             }),
         ).toBeVisible();
-        await expect(
-            page.getByText('Enregistrement confirmé.', { exact: true }),
-        ).toBeVisible();
+        await expectSaveConfirmation(page);
         const renders = await takeCatalogRendering(page);
         expect(
             renders.some((render) => render.pending || render.conflict),
@@ -404,9 +410,7 @@ test('a slow creation shows its spinner inside a stable centered button', async 
         await expect(
             page.getByRole('heading', { name, exact: true }),
         ).toBeVisible();
-        await expect(
-            page.getByText('Enregistrement confirmé.', { exact: true }),
-        ).toBeVisible();
+        await expectSaveConfirmation(page);
         await expect(
             page.getByRole('button', {
                 name: 'Enregistrer les textes',
@@ -427,9 +431,7 @@ test('a slow save stays visible without a false uncertainty and releases control
     const name = 'S' + randomUUID().slice(0, 6);
     const nextName = 'T' + name.slice(1);
     const url = await create(page, name);
-    await expect(
-        page.getByText('Enregistrement confirmé.', { exact: true }),
-    ).toBeVisible();
+    await expectSaveConfirmation(page);
     await page.evaluate(() => {
         document.documentElement.style.zoom = '2';
     });
@@ -506,9 +508,7 @@ test('a slow save stays visible without a false uncertainty and releases control
             page.getByRole('heading', { name: nextName, exact: true }),
         ).toBeVisible();
         await expect(button).toBeEnabled();
-        await expect(
-            page.getByText('Enregistrement confirmé.', { exact: true }),
-        ).toBeVisible();
+        await expectSaveConfirmation(page);
         const renders = await takeCatalogRendering(page);
         expect(
             renders.some((render) => render.pending || render.conflict),
@@ -675,9 +675,7 @@ test('an intervening authorized read does not consume the confirmation of a succ
     });
     const name = 'A03 receipt race ' + randomUUID();
     const url = await create(page, name);
-    await expect(
-        page.getByText('Enregistrement confirmé.', { exact: true }),
-    ).toBeVisible();
+    await expectSaveConfirmation(page);
     await expect(
         page.getByRole('heading', {
             name: 'Enregistrements à vérifier',
@@ -700,9 +698,7 @@ test('an intervening authorized read does not consume the confirmation of a succ
     await expect(
         page.getByRole('heading', { name: name + ' corrigé', exact: true }),
     ).toBeVisible();
-    await expect(
-        page.getByText('Enregistrement confirmé.', { exact: true }),
-    ).toBeVisible();
+    await expectSaveConfirmation(page);
     await expect(
         page.getByRole('heading', {
             name: 'Enregistrements à vérifier',
@@ -770,13 +766,11 @@ test('a newer external version before acknowledgement preserves the confirmed pr
             }),
         ).toBeVisible({ timeout: 20_000 });
         release();
+        await expectSaveConfirmation(page);
         await expect(
-            page.getByText('Enregistrement confirmé.', { exact: true }),
-        ).toBeVisible();
-        await expect(
-            page
-                .getByRole('status')
-                .filter({ hasText: 'La fiche a changé ailleurs.' }),
+            page.getByRole('status').filter({
+                hasText: 'La fiche a changé depuis le début de ta saisie.',
+            }),
         ).toBeVisible();
         await expect(page.getByLabel('Nom *', { exact: true })).toHaveValue(
             'My acquired proposal',
@@ -918,7 +912,9 @@ test('a real queued invalidation refreshes another browser without replacing its
         await expect(field).toHaveValue('Unsaved local proposal');
         await expect(field).toBeFocused();
         await expect(
-            other.getByText('La fiche a changé ailleurs.', { exact: false }),
+            other.getByText('La fiche a changé depuis le début de ta saisie.', {
+                exact: false,
+            }),
         ).toBeVisible();
         await other
             .getByRole('button', {
@@ -968,7 +964,10 @@ test('a response lost after commit is verified without a duplicate and without p
     await expect.poll(() => committed).toBe(true);
     await page.unroute('**/gestion/materiels');
     await expect(
-        page.getByText('Connexion interrompue.', { exact: false }),
+        page.getByRole('heading', {
+            name: 'Enregistrements à vérifier',
+            exact: true,
+        }),
     ).toBeVisible();
     await recoverAccess(page);
     await expect(page.getByLabel('Nom *', { exact: true })).toHaveValue(name);
@@ -1096,7 +1095,10 @@ test('an uncommitted send resumes only after checking and with exactly the same 
         .getByRole('button', { name: 'Créer le matériel', exact: true })
         .click();
     await expect(
-        page.getByText('Connexion interrompue.', { exact: false }),
+        page.getByRole('heading', {
+            name: 'Enregistrements à vérifier',
+            exact: true,
+        }),
     ).toBeVisible();
     await recoverAccess(page);
     await page
@@ -1322,7 +1324,10 @@ test('checking a lost edit rereads the current equipment while keeping a later d
     await expect.poll(() => committed).toBe(true);
     await page.unroute(url);
     await expect(
-        page.getByText('Connexion interrompue.', { exact: false }),
+        page.getByRole('heading', {
+            name: 'Enregistrements à vérifier',
+            exact: true,
+        }),
     ).toBeVisible();
     await recoverAccess(page);
     await expect(page.locator('[inert]')).toHaveCount(0);
@@ -1343,6 +1348,469 @@ test('checking a lost edit rereads the current equipment while keeping a later d
         'Later local proposal',
     );
     await expect(
-        page.getByText('This equipment changed elsewhere.', { exact: false }),
+        page.getByText('This equipment changed since you started editing.', {
+            exact: false,
+        }),
     ).toBeVisible();
+});
+
+for (const [width, locale] of [
+    [1280, 'fr'],
+    [360, 'en'],
+] as const) {
+    test(`state confirmation preserves text input and focus in ${locale} at ${width}px`, async ({
+        page,
+    }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await signIn(page);
+        const name = 'A04 state ' + randomUUID();
+        const url = await create(page, name);
+        await page.reload();
+        await expect(page.locator('[inert]')).toHaveCount(0);
+        await page.getByLabel('Nom *', { exact: true }).fill(name + ' draft');
+        if (locale === 'en')
+            await page.getByLabel('Langue de l’interface').selectOption('en');
+        const archiveLabel =
+            locale === 'fr' ? 'Archiver ce matériel' : 'Archive this equipment';
+        const reactivateLabel =
+            locale === 'fr'
+                ? 'Réactiver ce matériel'
+                : 'Reactivate this equipment';
+        const confirmLabel =
+            locale === 'fr' ? 'Confirmer l’archivage' : 'Confirm archiving';
+        const archiveButton = page.getByRole('button', {
+            name: archiveLabel,
+            exact: true,
+        });
+        await expect(archiveButton).toBeEnabled();
+        await archiveButton.click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog).toContainText(
+            locale === 'fr'
+                ? 'demandes existantes seront conservées'
+                : 'existing requests will be retained',
+        );
+        await page.keyboard.press('Escape');
+        await expect(dialog).toHaveCount(0);
+        await expect(archiveButton).toBeFocused();
+        const unchanged: unknown = await (
+            await page.request.get(url + '/lecture')
+        ).json();
+        expect(unchanged).toMatchObject({
+            status: 'active',
+            equipmentVersion: 1,
+        });
+        await archiveButton.click();
+        await dialog
+            .getByRole('button', { name: confirmLabel, exact: true })
+            .click();
+        await expect(
+            page.getByText(
+                locale === 'fr'
+                    ? 'Archivage confirmé.'
+                    : 'Archiving confirmed.',
+                { exact: true },
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByText(
+                locale === 'fr'
+                    ? 'Enregistrement confirmé.'
+                    : 'Save confirmed.',
+                { exact: true },
+            ),
+        ).toHaveCount(0, { timeout: 500 });
+        const reactivateButton = page.getByRole('button', {
+            name: reactivateLabel,
+            exact: true,
+        });
+        await expect(reactivateButton).toBeEnabled();
+        await expect(
+            page.getByLabel(locale === 'fr' ? 'Nom *' : 'Name *', {
+                exact: true,
+            }),
+        ).toHaveValue(name + ' draft');
+        await expect(
+            page.getByText(
+                locale === 'fr'
+                    ? 'La fiche a changé depuis le début de ta saisie. Ta saisie est conservée avec sa version de départ.'
+                    : 'This equipment changed since you started editing. Your input and its original version are retained.',
+                { exact: true },
+            ),
+        ).toBeVisible();
+        await reactivateButton.click();
+        await expect(
+            page.getByText(
+                locale === 'fr'
+                    ? 'Réactivation confirmée.'
+                    : 'Reactivation confirmed.',
+                { exact: true },
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByLabel(locale === 'fr' ? 'Nom *' : 'Name *', {
+                exact: true,
+            }),
+        ).toHaveValue(name + ' draft');
+        const result: unknown = await (
+            await page.request.get(url + '/lecture')
+        ).json();
+        expect(result).toMatchObject({
+            name,
+            status: 'active',
+            totalQuantity: 2,
+            equipmentVersion: 3,
+        });
+        expect(
+            await page.evaluate(
+                () => document.documentElement.scrollWidth <= window.innerWidth,
+            ),
+        ).toBe(true);
+        await expect(
+            page.getByRole('heading', {
+                name:
+                    locale === 'fr'
+                        ? 'Enregistrements à vérifier'
+                        : 'Saves to verify',
+                exact: true,
+            }),
+        ).toHaveCount(0);
+    });
+}
+
+test('archiving updates another filtered list and dirty detail through real private notifications', async ({
+    page,
+    browser,
+}) => {
+    await signIn(page);
+    const name = 'A04 windows ' + randomUUID();
+    const url = await create(page, name);
+    const otherContext = await browser.newContext();
+    try {
+        const list = await otherContext.newPage();
+        await signIn(list);
+        await list.getByLabel('Fragment du nom', { exact: true }).fill(name);
+        await list
+            .getByRole('button', { name: 'Rechercher', exact: true })
+            .click();
+        await expect(list).toHaveURL(/search=/);
+        const filteredUrl = list.url();
+        const detail = await otherContext.newPage();
+        observe(detail);
+        await detail.goto(url);
+        await expect(detail.locator('[inert]')).toHaveCount(0);
+        await detail
+            .getByLabel('Nom *', { exact: true })
+            .fill(name + ' other draft');
+        await page
+            .getByRole('button', { name: 'Archiver ce matériel', exact: true })
+            .click();
+        await page
+            .getByRole('dialog')
+            .getByRole('button', { name: 'Confirmer l’archivage', exact: true })
+            .click();
+        await expect(list.getByText('Archivé', { exact: true })).toBeVisible({
+            timeout: 20_000,
+        });
+        await expect(list).toHaveURL(filteredUrl);
+        await expect(
+            list.getByLabel('Fragment du nom', { exact: true }),
+        ).toHaveValue(name);
+        await expect(
+            detail.getByRole('button', {
+                name: 'Réactiver ce matériel',
+                exact: true,
+            }),
+        ).toBeVisible({ timeout: 20_000 });
+        await expect(detail.getByLabel('Nom *', { exact: true })).toHaveValue(
+            name + ' other draft',
+        );
+    } finally {
+        await otherContext.close();
+    }
+});
+
+test('a confirmation kept open retains the chosen archive and its original version after another window changes the equipment', async ({
+    page,
+    browser,
+}) => {
+    await signIn(page);
+    const name = 'A04 confirmation race ' + randomUUID();
+    const url = await create(page, name);
+    const otherContext = await browser.newContext();
+    try {
+        const other = await otherContext.newPage();
+        await signIn(other);
+        await other.goto(url);
+        await page
+            .getByRole('button', { name: 'Archiver ce matériel', exact: true })
+            .click();
+        await other
+            .getByRole('button', { name: 'Archiver ce matériel', exact: true })
+            .click();
+        await other
+            .getByRole('dialog')
+            .getByRole('button', { name: 'Confirmer l’archivage', exact: true })
+            .click();
+        await expect(
+            other.getByRole('button', {
+                name: 'Réactiver ce matériel',
+                exact: true,
+            }),
+        ).toBeEnabled();
+        await expect(page.locator('#equipment-state-action')).toHaveAttribute(
+            'aria-label',
+            'Réactiver ce matériel',
+            { timeout: 20_000 },
+        );
+        const request = page.waitForRequest(
+            (value) =>
+                value.method() === 'POST' && value.url() === url + '/archivage',
+        );
+        await page
+            .getByRole('dialog')
+            .getByRole('button', { name: 'Confirmer l’archivage', exact: true })
+            .click();
+        const body: unknown = (await request).postDataJSON();
+        expect(body).toMatchObject({ expectedVersion: 1 });
+        await expect(
+            page.getByRole('alert').filter({ hasText: 'Cette fiche' }).first(),
+        ).toBeVisible();
+        const result: unknown = await (
+            await page.request.get(url + '/lecture')
+        ).json();
+        expect(result).toMatchObject({
+            status: 'archived',
+            equipmentVersion: 2,
+        });
+    } finally {
+        await otherContext.close();
+    }
+});
+
+for (const committed of [true, false]) {
+    test(`an archive with a lost response ${committed ? 'after' : 'before'} commit is verified before any explicit identical resumption`, async ({
+        page,
+    }) => {
+        await signIn(page);
+        const name = 'A04 response ' + randomUUID();
+        const url = await create(page, name);
+        const bodies: unknown[] = [];
+        let intercept = true;
+        await page.route(url + '/archivage', async (route) => {
+            const body: unknown = route.request().postDataJSON();
+            bodies.push(body);
+            if (!intercept) return route.continue();
+            intercept = false;
+            if (committed) {
+                const response = await route.fetch({ maxRedirects: 0 });
+                expect([302, 303]).toContain(response.status());
+            }
+            await route.abort('failed');
+        });
+        await page
+            .getByRole('button', { name: 'Archiver ce matériel', exact: true })
+            .click();
+        await page
+            .getByRole('dialog')
+            .getByRole('button', { name: 'Confirmer l’archivage', exact: true })
+            .click();
+        await expect(
+            page.getByRole('heading', {
+                name: 'Enregistrements à vérifier',
+                exact: true,
+            }),
+        ).toBeVisible();
+        await recoverAccess(page);
+        if (committed) {
+            let tampered = 0;
+            await page.route(
+                '**/gestion/materiels/operations?**',
+                async (route) => {
+                    if (tampered >= 3) return route.continue();
+                    const response = await route.fetch();
+                    const value: unknown = await response.json();
+                    if (
+                        !value ||
+                        typeof value !== 'object' ||
+                        !('receipt' in value) ||
+                        !value.receipt ||
+                        typeof value.receipt !== 'object'
+                    )
+                        throw new Error(
+                            'Expected the acquired receipt fixture',
+                        );
+                    const replacement = [
+                        { operationKey: randomUUID() },
+                        { operationType: 'catalog.equipment.reactivate' },
+                        { resourceId: randomUUID() },
+                    ][tampered++];
+                    await route.fulfill({
+                        response,
+                        json: {
+                            ...value,
+                            receipt: { ...value.receipt, ...replacement },
+                        },
+                    });
+                },
+            );
+            for (let attempt = 0; attempt < 3; attempt++) {
+                await page
+                    .getByRole('button', {
+                        name: 'Vérifier le résultat',
+                        exact: true,
+                    })
+                    .click();
+                await expect(
+                    page.getByText(
+                        'Le résultat ne peut pas être vérifié pour le moment.',
+                        { exact: true },
+                    ),
+                ).toBeVisible();
+                await expect(
+                    page.getByRole('button', {
+                        name: 'Vérifier le résultat',
+                        exact: true,
+                    }),
+                ).toBeEnabled();
+                expect(bodies).toHaveLength(1);
+            }
+        }
+        await page
+            .getByRole('button', { name: 'Vérifier le résultat', exact: true })
+            .click();
+        if (committed) {
+            await expect(
+                page.getByText('Archivage confirmé.', { exact: true }),
+            ).toBeVisible();
+            expect(bodies).toHaveLength(1);
+        } else {
+            const resume = page.getByRole('button', {
+                name: 'Reprendre la même modification d’état',
+                exact: true,
+            });
+            await expect(resume).toBeEnabled();
+            await resume.click();
+            await expect(
+                page.getByText('Archivage confirmé.', { exact: true }),
+            ).toBeVisible();
+            expect(bodies).toHaveLength(2);
+            expect(bodies[1]).toEqual(bodies[0]);
+        }
+        await expect(
+            page.getByRole('button', {
+                name: 'Réactiver ce matériel',
+                exact: true,
+            }),
+        ).toBeVisible();
+        const result: unknown = await (
+            await page.request.get(url + '/lecture')
+        ).json();
+        expect(result).toMatchObject({
+            status: 'archived',
+            equipmentVersion: 2,
+        });
+    });
+}
+
+declare global {
+    interface Window {
+        __a04HashBarrier?: {
+            held: boolean;
+            release: (() => void) | null;
+            restore: () => void;
+        };
+    }
+}
+
+test('a state command prepared during loss of access stays verifiable and is never sent automatically on recovery', async ({
+    page,
+}) => {
+    await signIn(page);
+    const name = 'A04 hash barrier ' + randomUUID();
+    const url = await create(page, name);
+    await expect(
+        page.getByRole('button', { name: 'Archiver ce matériel', exact: true }),
+    ).toBeEnabled();
+    let sends = 0;
+    page.on('request', (request) => {
+        if (request.method() === 'POST' && request.url() === url + '/archivage')
+            sends++;
+    });
+    await page.evaluate(() => {
+        const original = crypto.subtle.digest.bind(crypto.subtle);
+        const barrier: NonNullable<Window['__a04HashBarrier']> = {
+            held: false,
+            release: null,
+            restore: () => {
+                crypto.subtle.digest = original;
+            },
+        };
+        window.__a04HashBarrier = barrier;
+        crypto.subtle.digest = async (algorithm, data) => {
+            const result = await original(algorithm, data);
+            barrier.held = true;
+            await new Promise<void>((resolve) => {
+                barrier.release = resolve;
+            });
+            return result;
+        };
+    });
+    try {
+        await page
+            .getByRole('button', { name: 'Archiver ce matériel', exact: true })
+            .click();
+        await page
+            .getByRole('dialog')
+            .getByRole('button', { name: 'Confirmer l’archivage', exact: true })
+            .click();
+        await page.waitForFunction(
+            () => window.__a04HashBarrier?.held === true,
+        );
+        await page.context().setOffline(true);
+        await expect(
+            page.getByText('Connexion interrompue.', { exact: false }),
+        ).toBeVisible();
+        await page.evaluate(() => {
+            window.__a04HashBarrier?.restore();
+            window.__a04HashBarrier?.release?.();
+        });
+        await page.context().setOffline(false);
+        await recoverAccess(page);
+        await expect(
+            page.getByRole('heading', {
+                name: 'Enregistrements à vérifier',
+                exact: true,
+            }),
+        ).toBeVisible();
+        expect(sends).toBe(0);
+        await page
+            .getByRole('button', { name: 'Vérifier le résultat', exact: true })
+            .click();
+        const resume = page.getByRole('button', {
+            name: 'Reprendre la même modification d’état',
+            exact: true,
+        });
+        await expect(resume).toBeEnabled();
+        await resume.click();
+        await expect(
+            page.getByText('Archivage confirmé.', { exact: true }),
+        ).toBeVisible();
+        expect(sends).toBe(1);
+        const result: unknown = await (
+            await page.request.get(url + '/lecture')
+        ).json();
+        expect(result).toMatchObject({
+            status: 'archived',
+            equipmentVersion: 2,
+        });
+    } finally {
+        await page.context().setOffline(false);
+        await page.evaluate(() => {
+            window.__a04HashBarrier?.restore();
+            window.__a04HashBarrier?.release?.();
+            delete window.__a04HashBarrier;
+        });
+    }
 });

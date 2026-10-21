@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\Catalog\Equipment\Errors;
+namespace App\Modules\Catalog\PublicApi\Errors;
 
 use App\Shared\Errors\DomainError;
 use RuntimeException;

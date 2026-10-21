@@ -77,6 +77,21 @@ describe('catalogue runtime contracts', () => {
             isReceipt({ ...receipt, operationType: 'arbitrary.class' }),
         ).toBe(false);
     });
+    it.each(['catalog.equipment.archive', 'catalog.equipment.reactivate'])(
+        'accepts only the selected receipt shape for %s',
+        (operationType) => {
+            expect(isReceipt({ ...receipt, operationType })).toBe(true);
+            expect(
+                isOperationResult({
+                    status: 'applied',
+                    receipt: { ...receipt, operationType },
+                }),
+            ).toBe(true);
+            expect(
+                isReceipt({ ...receipt, operationType, name: 'Private text' }),
+            ).toBe(false);
+        },
+    );
     it('accepts only the concrete invalidation payload and rejects additional private fields', () => {
         expect(isCatalogInvalidation({ projection: 'catalogManagement' })).toBe(
             true,

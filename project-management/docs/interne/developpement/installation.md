@@ -1,6 +1,6 @@
 # Installation et utilisation de la base
 
-**Version 0.12.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
+**Version 0.13.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
 
 Le projet comprend Laravel, Fortify, Inertia, Vue et les écrans d'authentification, avec les services retenus. Un clone reçoit les sources et leurs locks, sans nouvelle acquisition du kit. Les fonctionnalités et leurs contrats relèvent des [spécifications](../../cahiers-des-charges/fonctionnel/README.md) et des [contrats de modules](../architecture/contrats-et-lots.md).
 
@@ -148,6 +148,22 @@ IdentityAccess crée directement les trois tables `identity_access_workshops`, `
 
 Une installation neuve suit `migrate`, puis la préparation explicite des comptes ci-dessous. Une mise à jour ordinaire utilise également `migrate` et préserve les données. Après consolidation des migrations initiales selon R05-017, une base existante ne s'aligne pas par le seul changement des fichiers : appliquer uniquement après autorisation la procédure de reconstruction suivante. Une conservation sans reconstruction exige une compatibilité vérifiée de sa structure et de son historique `migrations`.
 
+### Aligner les familles de reçus Catalog sans reconstruire
+
+La création initiale de `operation_receipts` admet directement création, édition textuelle, archivage et réactivation. `migrate` ne réexécute pas une migration déjà enregistrée. Pour une installation conservant la version initiale à deux familles, vérifier la copie et son service PostgreSQL, les sauvegardes lisibles selon la procédure ci-dessous, puis l'historique complet des migrations et le schéma réel. Les deux migrations Catalog/reçus doivent déjà être enregistrées ensemble ; leurs noms et lots restent inchangés. Toute autre dérive demande inspection avant adaptation.
+
+Choisir explicitement `migration_database=laravel` ou `migration_database=testing`, puis utiliser le seul rôle migrateur de cette installation :
+
+```sh
+./vendor/bin/sail exec -T pgsql sh -ec '
+PGPASSWORD="$(cat /run/secrets/postgres_migrator_password)"
+export PGPASSWORD
+exec psql -X --no-password --host=127.0.0.1 --username=epr_migrator --dbname="$1" --file=/opt/epr-postgres-bootstrap/align-catalog-receipts.sql
+' sh "$migration_database"
+```
+
+Le script refuse toute autre base, identité, schéma, contrainte inattendue ou histoire Catalog/reçus absente. Il remplace uniquement `operation_receipts_type_check`, dans une transaction bornée ; une contrainte déjà conforme est conservée. Aucun compte, matériel, reçu, droit ou enregistrement de migration n'est réécrit. Relever après exécution contrainte validée, propriétaires, RLS et permissions, historique inchangé et données conservées, puis effectuer les tests ordinaires sur `testing`. Chaque cible demande ses propres contrôles et sauvegardes. Une installation neuve utilise les migrations initiales et n'a pas besoin de cet alignement.
+
 <a id="reconstruire-une-base-locale-après-consolidation"></a>
 
 ### Reconstruire une base locale après consolidation
@@ -219,6 +235,21 @@ Après les migrations, sur une cible locale autorisée vide uniquement, initiali
 Chaque cible reçoit deux ateliers avec responsable, agent et deux emprunteurs. Ces huit comptes de démonstration utilisent tous le mot de passe `password`, uniquement pour ces cibles locales. Leurs identifiants et le mot de passe sont également fournis dans `.epr-local/identity-laravel.json` ou `identity-testing.json`, en lecture privée locale. Les mots de passe sont hachés en base par Laravel. La préparation exige l'environnement `local`, la session migratrice et le rôle propriétaire ; HTTP et les tests n'acquièrent aucun droit de création de comptes. Aucun semis global n'est exécuté au lancement des tests.
 
 Une répétition sur une cible peuplée ou un reçu déjà présent est refusée, sans changement de compte ou de mot de passe. Le reçu privé est écrit et synchronisé avant la transaction SQL : après interruption, conserver le reçu et comparer la cible avant toute reprise ; sa présence seule ne prouve pas le commit. Après une reconstruction explicitement autorisée et vérifiée, l'ancien reçu de cette seule cible est archivé selon la procédure précédente, puis un nouveau reçu est créé avec les comptes réellement préparés. Hors de ce cas, conserver comptes et reçu ; toute divergence nécessite une inspection.
+
+### Préparer explicitement le Catalogue de démonstration
+
+`Catalog/Database/Seeders/CatalogDemoSeeder.php` est appelé uniquement par `catalog:prepare-demo`, jamais au démarrage ni par le semis global. Sur une cible locale expressément choisie, avec ses comptes synthétiques préparés, il fournit les six références par atelier du profil `demo` : noms identiques pour le tri stable, total nul, dernière unité, archive et plusieurs actives. Il ne crée aucune demande, aucun engagement ou image.
+
+Depuis le runtime ordinaire `epr_app`, pour le seul Catalogue vide de la cible choisie :
+
+```sh
+./vendor/bin/sail artisan catalog:prepare-demo --target=laravel --no-interaction
+./vendor/bin/sail exec -T --user sail -e DB_DATABASE=testing laravel.test php artisan catalog:prepare-demo --target=testing --no-interaction
+```
+
+Choisir une seule commande selon la cible autorisée ; ne pas peupler `laravel` déjà utilisé pour les essais manuels. Le contrôle vérifie la base et l'identité SQL effectives, l'absence de transaction extérieure et le reçu privé IdentityAccess de cette base. Les deux responsables y sont revalidés par les capacités publiques IdentityAccess ; le seeder ne consulte pas les tables de son voisin. Tout Catalogue déjà peuplé dans l'un des ateliers est refusé avant la préparation. Chaque atelier est rempli dans une unité propre, avec un nouveau contrôle de vacuité ; aucune atomicité entre ateliers n'est annoncée.
+
+Le manifeste privé `.epr-local/catalog-demo-<base>-<UUID>.json` est synchronisé avant les écritures et identifie exactement les douze UUID possédés par cette préparation. Après interruption, sa présence seule ne prouve pas que les deux ateliers sont préparés : comparer manifeste et SQL avant reprise, sans ressemer ni effacer aveuglément. Sur une cible d'essai autorisée, le retrait des seules fixtures identifiées utilise l'identité d'initialisation hors tests, après contrôle des dépendances ; il ne donne aucun droit de suppression au runtime. Les identifiants et mots de passe des comptes restent ceux du reçu IdentityAccess.
 
 ### SMTP de développement
 

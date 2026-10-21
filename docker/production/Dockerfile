@@ -21,7 +21,8 @@ RUN apk add --no-cache --no-scripts --root /base-root \
     && ldconfig -r /base-root \
     && chroot /base-root /usr/bin/busybox --install -s /usr/bin
 
-FROM base AS runtime
+# Preserve the upgraded filesystem without restoring files removed by APK.
+FROM scratch AS runtime
 USER root
 COPY --from=apk-assembly /base-root /
 RUN addgroup -g 10001 app \

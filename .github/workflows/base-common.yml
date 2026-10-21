@@ -260,6 +260,76 @@ jobs:
                   ./vendor/bin/sail exec -T --user sail --env PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.epr-local/downloads/chromium laravel.test npm exec --no -- playwright install chromium
                   ./vendor/bin/sail exec -T --user sail --env PLAYWRIGHT_BROWSERS_PATH=/var/www/html/.epr-local/downloads/chromium laravel.test npm run test:browser
 
+            - name: Fabriquer les paquets PHP corrigés depuis les sources vérifiées
+              if: ${{ inputs.image_ref == '' }}
+              timeout-minutes: 30
+              run: |
+                  python3 - <<'PYPHP'
+                  import hashlib, json, os, tarfile, urllib.request
+                  from pathlib import Path
+                  spec = json.loads(Path('docker/production/php-source.json').read_text())
+                  root = Path(os.environ['RUNNER_TEMP']) / 'php-source'
+                  root.mkdir(mode=0o700)
+                  for directory in ['tmp', 'packages']:
+                      (root / directory).mkdir()
+                  def download(url, target, expected):
+                      data = urllib.request.urlopen(url, timeout=120).read()
+                      assert hashlib.sha256(data).hexdigest() == expected, url
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      target.write_bytes(data)
+                  for name, digest in spec['files'].items():
+                      download(f'https://raw.githubusercontent.com/wolfi-dev/os/{spec["wolfiCommit"]}/{name}', root / 'upstream' / name, digest)
+                  archive = root / 'melange.tar.gz'
+                  download(f'https://github.com/chainguard-dev/melange/releases/download/v{spec["melangeVersion"]}/melange_{spec["melangeVersion"]}_linux_amd64.tar.gz', archive, spec['melangeArchiveSha256'])
+                  with tarfile.open(archive) as source:
+                      entry = next(item for item in source.getmembers() if item.isfile() and item.name.rsplit('/', 1)[-1] == 'melange')
+                      (root / 'melange').write_bytes(source.extractfile(entry).read())
+                  (root / 'melange').chmod(0o700)
+                  download('https://packages.wolfi.dev/os/wolfi-signing.rsa.pub', root / 'wolfi-signing.rsa.pub', spec['wolfiSigningKeySha256'])
+                  recipe = (root / 'upstream/php-8.5.yaml').read_text()
+                  changes = [
+                      ('version: "8.5.11"', f'version: "{spec["phpVersion"]}"'),
+                      ('epoch: 3 # php-src: uint64_t SSL_CTX options (ECH GREASE)', 'epoch: 0'),
+                      ('expected-commit: 678778973bb4d4185c06ef1320de50f1a975d3c8', f'expected-commit: {spec["phpCommit"]}'),
+                      ('cpu: "19"', 'cpu: "8"'),
+                      ('memory: 14Gi', 'memory: 6Gi'),
+                  ]
+                  for old, new in changes:
+                      assert recipe.count(old) == 1, old
+                      recipe = recipe.replace(old, new)
+                  (root / 'php-8.5.yaml').write_text(recipe)
+                  PYPHP
+                  package_root="$RUNNER_TEMP/php-source"
+                  "$package_root/melange" keygen "$package_root/build-signing.rsa"
+                  docker run --rm --user 0:0 --read-only --workdir "$package_root" \
+                    --env "TMPDIR=$package_root/tmp" \
+                    --mount "type=bind,src=$package_root,dst=$package_root" \
+                    --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+                    --entrypoint "$package_root/melange" \
+                    cgr.dev/chainguard/wolfi-base@sha256:030e45cb37187dff322bbefe9658bcaec31b824a5d523380771a64864c9f45d4 \
+                    build php-8.5.yaml --arch x86_64 --runner docker --namespace wolfi \
+                    --source-dir upstream/php-8.5 --pipeline-dir upstream/pipelines \
+                    --repository-append https://packages.wolfi.dev/os \
+                    --repository-append https://apk.cgr.dev/chainguard \
+                    --keyring-append wolfi-signing.rsa.pub --signing-key build-signing.rsa \
+                    --out-dir packages --cache-dir cache --apk-cache-dir apk-cache \
+                    --generate-provenance --git-repo-url https://github.com/epr-chef-projet/epreuve-corpus-pret-materiel \
+                    --git-commit "$EXPECTED_SOURCE" \
+                    --license Apache-2.0 --timeout 25m
+                  cp "$package_root/build-signing.rsa.pub" "$package_root/packages/"
+                  mkdir -p "$RUNNER_TEMP/image-proof"
+                  python3 - <<'PYPHPPROOF'
+                  import hashlib, json, os
+                  from pathlib import Path
+                  root = Path(os.environ['RUNNER_TEMP'])
+                  spec = json.loads(Path('docker/production/php-source.json').read_text())
+                  files = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (root / 'php-source/packages/x86_64').glob('*.apk')}
+                  assert f'php-8.5-{spec["phpVersion"]}-r0.apk' in files
+                  assert f'php-8.5-fpm-{spec["phpVersion"]}-r0.apk' in files
+                  proof = {'spec': spec, 'recipeSha256': hashlib.sha256((root / 'php-source/php-8.5.yaml').read_bytes()).hexdigest(), 'packages': files, 'signingPublicKeySha256': hashlib.sha256((root / 'php-source/build-signing.rsa.pub').read_bytes()).hexdigest()}
+                  (root / 'image-proof/php-source-packages.json').write_text(json.dumps(proof, indent=2) + '\n')
+                  PYPHPPROOF
+
             - name: Construire ou récupérer le livrable exact
               id: image
               timeout-minutes: 20
@@ -280,7 +350,7 @@ jobs:
                   import hashlib, json, os
                   from pathlib import Path
                   root = Path(os.environ['RUNNER_TEMP'])
-                  files = ['.dockerignore', 'docker/production/Dockerfile', 'docker/production/php.ini', 'docker/production/php-fpm.conf', 'docker/production/nginx.conf', 'docker/production/entrypoint.sh', 'docker/imagick/policy.xml']
+                  files = ['.dockerignore', 'docker/production/Dockerfile', 'docker/production/php-source.json', 'docker/production/php.ini', 'docker/production/php-fpm.conf', 'docker/production/nginx.conf', 'docker/production/entrypoint.sh', 'docker/imagick/policy.xml']
                   hashes = {name: hashlib.sha256((root / 'image-context' / name).read_bytes()).hexdigest() for name in files}
                   recipe = hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
                   (root / 'image-proof' / 'recipe.json').write_text(json.dumps({'sourceSha': os.environ['EXPECTED_SOURCE'], 'files': hashes, 'recipeSha256': recipe}, indent=2) + '\n')
@@ -294,6 +364,7 @@ jobs:
                       cache_options+=(--cache-to "type=local,dest=$RUNNER_TEMP/build-cache-export/production,mode=max,ignore-error=true")
                     fi
                     docker buildx build --platform linux/amd64 --load --provenance=false "${cache_options[@]}" \
+                      --build-context "php-packages=$RUNNER_TEMP/php-source/packages" \
                       --file "$RUNNER_TEMP/image-context/docker/production/Dockerfile" \
                       --build-arg "FRONTEND_BUILD_IMAGE=$builder" --build-arg "RECIPE_SHA256=$recipe" \
                       --build-arg "SOURCE_SHA=$EXPECTED_SOURCE" --build-arg "BUILD_RUN=$GITHUB_RUN_ID" \
@@ -328,9 +399,20 @@ jobs:
                   }
                   ksort($packages);
                   foreach ($packages as $name => $version) { if (str_starts_with($name, "nginx-stable")) { exit(1); } }
+                  foreach ($packages as $name => $version) {
+                      if (str_starts_with($name, "php-8.5") && !preg_match("~^php-8[.]5-(redis|imagick|igbinary)(-|$)~", $name) && $version !== "8.5.12-r0") { exit(1); }
+                  }
                   foreach (["nginx-mainline", "nginx-mainline-config", "nginx-mainline-fastcgi-params", "nginx-mainline-mime-types", "nginx-mainline-scgi-params", "nginx-mainline-uwsgi-params"] as $name) { if (($packages[$name] ?? null) !== "1.31.6-r3") { exit(1); } }
                   echo json_encode(["php" => PHP_VERSION, "extensions" => $extensions, "packages" => $packages], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n";
                   ' > "$RUNNER_TEMP/image-proof/php-inventory.json"
+                  docker run --rm --entrypoint php-fpm "$EPR_IMAGE" --version > "$RUNNER_TEMP/image-proof/php-fpm-version.txt"
+                  python3 - <<'PYPHPFPM'
+                  import json, os, re
+                  from pathlib import Path
+                  root = Path(os.environ['RUNNER_TEMP']) / 'image-proof'
+                  version = re.search(r'^PHP (\d+\.\d+\.\d+) ', (root / 'php-fpm-version.txt').read_text())
+                  assert version and version[1] == json.loads((root / 'php-inventory.json').read_text())['php']
+                  PYPHPFPM
                   docker run --rm --entrypoint sh "$EPR_IMAGE" -ec '
                     test "$(id -u)" = 10001
                     test ! -e .env && test ! -e public/hot && test ! -e vendor/laravel/boost && test ! -e vendor/laravel/sail
@@ -466,6 +548,7 @@ jobs:
                   composer = [r for r in report['Results'] if r.get('Class') == 'lang-pkgs' and r['Type'] == 'composer-vendor']
                   assert len(os_targets) == len(composer) == 1 and composer[0]['Packages']
                   assert {p['Name']: p['Version'] for p in os_targets[0]['Packages']} == inventory['packages']
+                  assert all(p.get('Identifier', {}).get('PURL', '').startswith('pkg:apk/wolfi/') for p in os_targets[0]['Packages'])
                   assert not any(r.get('IgnoredVulnerabilities') for r in report['Results'])
                   counts = {severity: 0 for severity in ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']}
                   for result in report['Results']:

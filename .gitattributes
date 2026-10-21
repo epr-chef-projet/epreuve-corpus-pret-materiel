@@ -37,7 +37,6 @@ CHANGELOG.md export-ignore
 .ai/rules/socle/20-environnement-dependances-qualite.md -text !eol
 .ai/rules/socle/21-livraison-exploitation-reprise.md -text !eol
 .ai/rules/socle/22-erreurs-exceptions.md -text !eol
-docker/bootstrap/Dockerfile -text !eol
 
 # Private working notes and local runtime state are never shared in Git archives.
 project-management/local export-ignore

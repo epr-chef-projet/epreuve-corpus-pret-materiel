@@ -1,16 +1,16 @@
-# Environnement — prêt de matériel
+# Environnement - prêt de matériel
 
-**Version 1.0.** Ce document possède les versions, paramètres et raccordements locaux. L'[installation](installation.md) possède l'amorçage et le cycle de développement ; les [contrôles](qualite-et-recette.md) et le [contrat de livraison](../exploitation/collaboration-livraison.md) possèdent leurs recettes respectives. Les [contrats de données](../../cahiers-des-charges/technique/donnees-securite.md) possèdent les privilèges et le contexte RLS.
+**Version 1.1.** Ce document possède les versions, paramètres et raccordements locaux. L'[installation](installation.md) possède l'amorçage et le cycle de développement ; les [contrôles](qualite-et-recette.md) et le [contrat de livraison](../exploitation/collaboration-livraison.md) possèdent leurs recettes respectives. Les [contrats de données](../../cahiers-des-charges/technique/donnees-securite.md) possèdent les privilèges et le contexte RLS.
 
 Les services de développement sont HTTP, Vite/HMR, PostgreSQL, Redis, Mailpit, Horizon, Reverb et ordonnanceur. Le build fournit les assets de livraison et reste un contrôle de qualité. Les capacités métier, leurs tests et les mécanismes supplémentaires sont vérifiés dans les fonctionnalités qui les introduisent ; une réception d'installation ne les qualifie pas.
 
 <a id="versions"></a>
 
-## EPR-ENV-01 — Plateforme et compatibilité
+## EPR-ENV-01 - Plateforme et compatibilité
 
 | Composant         | Cible proposée                                                                                                                            | Verrouillage et réception à l'étape concernée                                                                                                                                                                                                                                   |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Laravel / PHP     | Laravel 13, PHP 8.5 64 bits                                                                                                               | Patchs, extensions, options et `composer.lock` ; contrôler réellement plateforme et APIs. Laravel 13 déclare PHP 8.3 à 8.5 compatibles. [Versions Laravel](https://laravel.com/framework/docs/releases), [support PHP](https://www.php.net/supported-versions.php).             |
+| Laravel / PHP     | Laravel 13, PHP 8.5.12 minimum, 64 bits                                                                                                   | Patchs, extensions, options et `composer.lock` ; contrôler réellement plateforme et APIs. Laravel 13 déclare PHP 8.3 à 8.5 compatibles. [Versions Laravel](https://laravel.com/framework/docs/releases), [support PHP](https://www.php.net/supported-versions.php).             |
 | Développement PHP | Sail, runtime 8.5                                                                                                                         | Version de Sail, Dockerfile et digest des bases ; sa documentation propose ce runtime, sans prouver la configuration du projet. [Sail](https://laravel.com/framework/docs/sail).                                                                                                |
 | Composer          | Composer 2 compatible avec les packages résolus                                                                                           | Version exacte dans l'image d'amorçage et les runtimes ; plugins autorisés explicitement.                                                                                                                                                                                       |
 | Frontend          | Node 24 LTS et npm 11 ; Vue 3, TypeScript, Inertia, Vite, Tailwind                                                                        | Résolution compatible du starter officiel, `package-lock.json`, versions du Node/npm effectif ; pas de remplacement par un Node global. [Node 24 LTS](https://nodejs.org/en/blog).                                                                                              |
@@ -18,11 +18,13 @@ Les services de développement sont HTTP, Vite/HMR, PostgreSQL, Redis, Mailpit, 
 | Redis             | Redis Open Source 8, branche 8.2 maintenue proposée                                                                                       | Patch, licence choisie, image, client PHP et comportement Horizon à qualifier. La branche 8.2 a un support étendu ; « Redis 8 » seul ne verrouille pas une image. [Versions Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/version-mgmt/).                   |
 | Contrats / rendus | Laravel Data 4 et TypeScript Transformer 3 candidats ; API image Laravel/Intervention 4 + Imagick ; wrapper Laravel Dompdf 3.1.x candidat | Capacités et versions exactes à recevoir au lot qui les utilise ; [contrats](../architecture/contrats-et-lots.md) et [fichiers](../../cahiers-des-charges/technique/traitements-fichiers.md) possèdent leur emploi. Leur présence ne prouve pas le rendu ou le contrat attendu. |
 
+La contrainte PHP de `composer.json` et de `composer.lock` impose au moins 8.5.12 dans la branche 8.5. La construction Sail refuse une version antérieure ; la CI et la publication comparent aussi le PHP de livraison à la dernière publication officielle 8.5 et reprennent les scans actualisés. Ces exigences concernent tous les processus PHP, y compris les workers persistants.
+
 Les runtimes PHP applicatifs doivent contenir les extensions requises par Laravel, les locks et les capacités utilisées, dont `pdo_pgsql`, `mbstring`, `intl`, `bcmath`, `fileinfo`, `openssl`, `zip`, `pcntl`, `posix` et le client Redis retenu ; Imagick/`exif`, fonts PDF et politiques ImageMagick se reçoivent avec les rendus concernés. Le runtime construit avant `vendor/` doit satisfaire les exigences du lock et des commandes d'amorçage ; il fournit ensuite le runtime applicatif de développement et se requalifie si ces exigences évoluent. Il reste distinct de l'image de livraison. Vérifier séparément extensions système et pilote PostgreSQL. `composer check-platform-reqs` complète la réception ; il ne prouve ni SQL, ni rendus, ni transport. Les références exactes des images d'amorçage, Sail, livraison, PostgreSQL, Redis et navigateur sont versionnées à leur introduction ; aucun digest d'exemple n'est une valeur utilisable.
 
 <a id="instances"></a>
 
-## EPR-ENV-02 — Instances et adresses
+## EPR-ENV-02 - Instances et adresses
 
 Les instances de développement utilisent des copies distinctes dans le système de fichiers Linux WSL, sous des chemins choisis à l'installation. Terminal et éditeur ouvrent la même racine Git ; un autre dossier n'est pas une copie automatiquement synchronisée. Les identifiants `a`, `b` et `c` sélectionnent les paramètres ci-dessous.
 
@@ -42,7 +44,7 @@ Cette séparation protège contre les confusions ordinaires de cible, pas contre
 
 <a id="configuration"></a>
 
-## EPR-ENV-03 — Configuration effective
+## EPR-ENV-03 - Configuration effective
 
 Le Compose de développement, les exemples sans secrets, les runtimes/images et le mode d'amorçage définissent les raccordements de la base. Les profils d'essai et de livraison se vérifient séparément. L'amorçage et la garde Sail contrôlent racine, `EPR_INSTANCE`, identité Compose, fichiers sélectionnés, moteur Docker, utilisateur et montages ; une divergence est refusée avant l'opération. Contrôler aussi les valeurs héritées `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `DOCKER_HOST`, `DOCKER_CONTEXT`, `SAIL_FILES`, `APP_SERVICE`, `APP_USER` et la sélection `.env.<APP_ENV>` avant de démarrer Laravel.
 
@@ -60,7 +62,7 @@ Les [rôles SQL et secrets de l'installation](installation.md#3-configuration-se
 
 <a id="bootstrap"></a>
 
-## EPR-ENV-04 — Clone propre, sans `vendor/`
+## EPR-ENV-04 - Clone propre, sans `vendor/`
 
 La commande `scripts/bootstrap --instance a`, avec `a`, `b` ou `c` comme identité explicite, initialise seulement les paramètres privés manquants du clone. Une copie supplémentaire de qualification peut utiliser `--run <nom>`. Les commandes Docker documentées rendent le runtime disponible avant `vendor/`, sans exiger PHP, Node, Composer ou Sail sur l’hôte.
 
@@ -70,7 +72,7 @@ Ne pas remplacer cette recette par une acquisition initiale du kit ou un runtime
 
 <a id="commandes"></a>
 
-## EPR-ENV-05 — Commandes de base et contrats ultérieurs
+## EPR-ENV-05 - Commandes de base et contrats ultérieurs
 
 Les commandes ci-dessous préparent la base et assurent son cycle de développement. Arguments obligatoires, absence de cible implicite et résolution contrôlée s'appliquent à chaque opération. Une commande n'installe pas un outil manquant à la volée. Toute capacité supplémentaire exige une conception et une attribution explicites.
 
@@ -89,7 +91,7 @@ Sail exécute PHP/Composer/npm/contrôles en développement après amorçage. Gi
 
 <a id="processus"></a>
 
-## EPR-ENV-06 — Processus et réception
+## EPR-ENV-06 - Processus et réception
 
 Le profil de développement maintient HTTP, Vite/HMR, Horizon, Reverb et `schedule:work` avec les services explicitement supervisés. Le relais durable est raccordé avec les fonctionnalités qui l'utilisent ; aucun worker supplémentaire n'est improvisé. Le [contrat d'image](../exploitation/collaboration-livraison.md#image) est distinct de Sail : Chainguard/Wolfi PHP-FPM avec nginx-mainline et image commune aux cinq rôles HTTP nginx, PHP-FPM, Horizon, Reverb et ordonnanceur. Tous utilisent le même digest, sans montage des sources de développement ni outillage de développement/MCP. nginx écoute sur 8080 sans utilisateur root ; PHP et consommateurs utilisent un utilisateur applicatif non privilégié. Code/assets en lecture seule, écriture limitée aux chemins de cache/journaux/fichiers privés ; initialiser les droits sans `chmod 777`. Les signaux d'arrêt sont SIGQUIT pour nginx/FPM et SIGTERM pour Horizon/Reverb/ordonnanceur. Vérifier configuration, gestionnaire PID 1, réseaux, ressources et publication utile dans le profil de livraison. [Compose en production](https://docs.docker.com/compose/how-tos/production/).
 
@@ -101,13 +103,13 @@ Le panel HTTP Horizon et ses APIs de diagnostics sont désactivés/refusés expl
 
 <a id="agents"></a>
 
-## EPR-ENV-07 — Agents et corpus
+## EPR-ENV-07 - Agents et corpus
 
 Suivre le [raccordement autonome](../raccordement-agents.md) : CLI et instructions Codex/Claude depuis la racine Linux avant le diagnostic/plan, corpus canonique unique et entrées préexistantes préservées ; puis Boost/MCP une fois Sail disponible et sa plateforme vérifiée. Vérifier racine/sous-dossier, appel MCP utile, fragment unique et génération stable ; désactiver le gestionnaire concurrent des règles selon la version retenue. CLI/Boost appartiennent au profil de développement, pas à l'image de livraison. Les fichiers présents ne prouvent ni découverte, ni connexion.
 
 <a id="mesures"></a>
 
-## EPR-ENV-08 — Mesures d'environnement
+## EPR-ENV-08 - Mesures d'environnement
 
 Relever CPU/RAM, limites WSL/Docker, emplacement des sources, images, Xdebug, navigateur et services actifs ; conserver une mesure courte du démarrage/affichage et une reproduction de l'installation, avec conditions et limites. La campagne ci-dessous vérifie les objectifs d'environnement ; sa description ne demande pas une plateforme de mesure personnalisée.
 

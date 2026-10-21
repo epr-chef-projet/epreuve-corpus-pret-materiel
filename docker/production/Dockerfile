@@ -16,11 +16,13 @@ RUN apk add --no-cache --no-scripts --root /base-root \
       nginx-mainline=1.31.6-r3 nginx-mainline-config=1.31.6-r3 \
       nginx-mainline-fastcgi-params=1.31.6-r3 nginx-mainline-mime-types=1.31.6-r3 \
       nginx-mainline-scgi-params=1.31.6-r3 nginx-mainline-uwsgi-params=1.31.6-r3 \
-      busybox=1.38.0-r3 curl=8.22.0-r4 \
+      busybox=1.38.0-r3 curl=8.23.0-r1 libcurl-openssl4=8.23.0-r1 \
+      ca-certificates=20260909-r3 ca-certificates-bundle=20260909-r3 \
     && ldconfig -r /base-root \
     && chroot /base-root /usr/bin/busybox --install -s /usr/bin
 
-FROM base AS runtime
+# Copy the assembled root once so removed package files stay removed.
+FROM scratch AS runtime
 USER root
 COPY --from=apk-assembly /base-root /
 RUN addgroup -g 10001 app \
@@ -31,7 +33,9 @@ COPY docker/production/nginx.conf /etc/nginx/nginx.conf
 COPY docker/imagick/policy.xml /etc/epr-imagick/policy.xml
 RUN sed '/^<!DOCTYPE policymap>$/d' /etc/epr-imagick/policy.xml > /etc/ImageMagick-7/policy.xml \
     && cp /etc/ImageMagick-7/policy.xml /etc/epr-imagick/policy.xml
-ENV MAGICK_CONFIGURE_PATH=/etc/epr-imagick \
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    MAGICK_CONFIGURE_PATH=/etc/epr-imagick \
     APP_ENV=production APP_DEBUG=false LOG_CHANNEL=stderr LOG_LEVEL=info
 WORKDIR /var/www/html
 

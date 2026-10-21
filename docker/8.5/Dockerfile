@@ -97,7 +97,8 @@ RUN test -n "$EPR_CACHE_REFRESH" && apt-get update && apt-get upgrade -y --with-
     && if [ "$(npm --version)" != "11.21.0" ]; then npm install -g npm@11.21.0; fi \
     && apt-get -y autoremove && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
-    && setcap "cap_net_bind_service=+ep" /usr/bin/php8.5
+    && setcap "cap_net_bind_service=+ep" /usr/bin/php8.5 \
+    && php -r 'if (PHP_VERSION_ID < 80512 || PHP_VERSION_ID >= 80600) { fwrite(STDERR, "PHP 8.5.12 or a newer 8.5 patch is required.\n"); exit(1); }'
 
 EXPOSE 80/tcp
 

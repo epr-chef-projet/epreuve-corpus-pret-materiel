@@ -433,7 +433,8 @@ jobs:
                   curl -fsSL 'https://www.php.net/releases/index.php?json&version=8.5' -o "$RUNNER_TEMP/image-proof/php-official.json"
                   curl -fsSL https://pecl.php.net/rest/r/redis/stable.txt -o "$RUNNER_TEMP/image-proof/redis-official.txt"
                   curl -fsSL https://pecl.php.net/rest/r/imagick/stable.txt -o "$RUNNER_TEMP/image-proof/imagick-official.txt"
-                  curl -fsSL https://www.php.net/releases/8_5_11.php -o "$RUNNER_TEMP/image-proof/php-publication.html"
+                  php_release=$(python3 -c 'import json, os, re; from pathlib import Path; version = json.loads((Path(os.environ["RUNNER_TEMP"]) / "image-proof/php-official.json").read_text())["version"]; assert re.fullmatch(r"8\.5\.[0-9]+", version); print(version.replace(".", "_"))')
+                  curl -fsSL "https://www.php.net/releases/$php_release.php" -o "$RUNNER_TEMP/image-proof/php-publication.html"
                   curl -fsSL https://pecl.php.net/package-changelog.php?package=redis -o "$RUNNER_TEMP/image-proof/redis-publication.html"
                   curl -fsSL https://pecl.php.net/package-changelog.php?package=imagick -o "$RUNNER_TEMP/image-proof/imagick-publication.html"
                   python3 - <<'PYTHON'

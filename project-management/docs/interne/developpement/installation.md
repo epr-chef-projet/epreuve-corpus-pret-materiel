@@ -1,6 +1,6 @@
 # Installation et utilisation de la base
 
-**Version 0.10.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
+**Version 0.11.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
 
 Le projet comprend Laravel, Fortify, Inertia, Vue et les écrans d'authentification, avec les services retenus. Un clone reçoit les sources et leurs locks, sans nouvelle acquisition du kit. Les fonctionnalités et leurs contrats relèvent des [spécifications](../../cahiers-des-charges/fonctionnel/README.md) et des [contrats de modules](../architecture/contrats-et-lots.md).
 
@@ -251,7 +251,7 @@ Préserver les modifications locales et sélectionner la révision selon la proc
 
 ```sh
 ./vendor/bin/sail stop -t 90
-docker compose build laravel.test
+docker compose build --build-arg EPR_CACHE_REFRESH="$(date -u +%F)" laravel.test
 docker compose -f compose.yaml -f compose.bootstrap.yaml up -d --wait --wait-timeout 90 --force-recreate --no-build --pull never laravel.test pgsql redis mailpit
 ./vendor/bin/sail composer install --no-scripts --no-plugins --no-interaction
 ./vendor/bin/sail composer dump-autoload --no-scripts --no-interaction
@@ -259,6 +259,8 @@ docker compose -f compose.yaml -f compose.bootstrap.yaml up -d --wait --wait-tim
 ./vendor/bin/sail composer check-platform-reqs
 ./vendor/bin/sail artisan package:discover --no-interaction
 ```
+
+Le paramètre `EPR_CACHE_REFRESH` renouvelle les index et paquets système pour la journée UTC lors de cette reconstruction. La construction refuse PHP antérieur à 8.5.12 ou hors de la branche 8.5. Après reprise, contrôler `./vendor/bin/sail php --version` et le PHP réellement utilisé dans `horizon`, `reverb` et `scheduler` avec `./vendor/bin/sail exec -T <service> php --version`. Aucun processus PHP persistant ne doit conserver l’ancien runtime. Cette mise à jour technique ne demande ni réinitialisation SQL ni nouvelle clé applicative.
 
 La construction est nécessaire si sa recette change ; `composer install` et `npm ci` suivent leurs locks. Préparer les migrations modifiées avec la procédure réservée ci-dessus, puis reprendre générations, build, démarrage et contrôles affectés. La configuration Compose transmet les budgets ImageMagick aux processus PHP dès leur création ; une modification de ces paramètres demande leur recréation, sans assouplir les tests de limites.
 

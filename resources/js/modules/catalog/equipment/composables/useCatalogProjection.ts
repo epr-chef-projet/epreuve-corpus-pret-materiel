@@ -6,6 +6,7 @@ import {
     shallowRef,
     watch,
     type Ref,
+    type ShallowRef,
 } from 'vue';
 import {
     sessionSubscriptionsKey,
@@ -18,11 +19,13 @@ export function useCatalogProjection<T>(
     initial: Ref<T>,
     identity: () => string,
     read: (signal: AbortSignal) => Promise<T>,
+    accepts: (incoming: T, current: T) => boolean = () => true,
 ) {
     const access = useAccessStore();
     const subscriptions = inject(sessionSubscriptionsKey, null);
     const generation = access.generation;
-    const data = shallowRef<T>(initial.value);
+    const data: ShallowRef<T> = shallowRef<T>(initial.value);
+    let dataIdentity = identity();
     const busy = ref(false);
     const stale = ref(true);
     const expired = ref(false);
@@ -107,11 +110,16 @@ export function useCatalogProjection<T>(
             if (!current() || controller.signal.aborted || key !== identity())
                 return;
             const captured = consumer ? consumer.settleRead() : true;
-            if (!captured || observedEpoch !== epoch) {
+            if (
+                !captured ||
+                observedEpoch !== epoch ||
+                (key === dataIdentity && !accepts(value, data.value))
+            ) {
                 dirty = true;
                 return;
             }
             data.value = value;
+            dataIdentity = key;
             stale.value = false;
             failed.value = false;
             attempts = 0;
@@ -152,7 +160,11 @@ export function useCatalogProjection<T>(
         });
     const stopInitial = watch(initial, (value) => {
         if (current()) {
-            data.value = value;
+            const key = identity();
+            if (key !== dataIdentity || accepts(value, data.value)) {
+                data.value = value;
+                dataIdentity = key;
+            }
             stale.value = true;
             failed.value = false;
             manualRefreshing.value = false;

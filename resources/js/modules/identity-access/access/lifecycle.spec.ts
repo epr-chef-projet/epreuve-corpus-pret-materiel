@@ -200,3 +200,101 @@ describe('HTTP generation boundary', () => {
         expect(request).toHaveBeenCalledTimes(3);
     });
 });
+
+it('keeps local logout pending through language and network recovery until an explicit successful logout', async () => {
+    const authenticated = {
+        ...guest,
+        user: {
+            id: '019a0000-0000-7000-8000-000000000001',
+            login: 'synthetic',
+            displayName: 'Synthetic',
+            workshopId: '019a0000-0000-7000-8000-000000000002',
+            workshopName: 'Synthetic',
+            role: 'manager',
+        },
+        broadcastToken: 'a'.repeat(64),
+        authGeneration: 1,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+    };
+    let current: unknown = authenticated;
+    const request = vi.fn(() =>
+        Promise.resolve({
+            data: JSON.stringify(current),
+            status: 200,
+            headers: {},
+        }),
+    );
+    http.setClient({ request });
+    const post = vi.spyOn(router, 'post').mockImplementation(() => {});
+    const presentation = createPresentation(commonMessages);
+    const lifecycle = installAccessLifecycle(presentation);
+    dispose = () => {
+        lifecycle.dispose();
+        presentation.dispose();
+    };
+    const access = useAccessStore();
+    await flushPromises();
+    expect(access.status).toBe('active');
+    lifecycle.signOut();
+    expect(access.context).toBeNull();
+    expect(access.logoutPending).toBe(true);
+    post.mock.calls[0][2]?.onNetworkError?.(new HttpNetworkError('Offline'));
+    window.dispatchEvent(new Event('online'));
+    presentation.i18n.global.locale.value = 'en';
+    await flushPromises();
+    await lifecycle.resumeAccess();
+    expect(access.context).toBeNull();
+    expect(access.logoutPending).toBe(true);
+    expect(post).toHaveBeenCalledTimes(1);
+    lifecycle.signOut();
+    expect(post).toHaveBeenCalledTimes(2);
+    current = guest;
+    lifecycle.finishLogout();
+    await flushPromises();
+    expect(access.status).toBe('guest');
+    expect(access.logoutPending).toBe(false);
+});
+
+it('does not let an aborted older context failure mark a successful recovery offline', async () => {
+    let reject!: (error: Error) => void;
+    const late = new Promise<HttpResponse>((_resolve, fail) => {
+        reject = fail;
+    });
+    const request = vi
+        .fn()
+        .mockReturnValueOnce(late)
+        .mockResolvedValue({
+            data: JSON.stringify(guest),
+            status: 200,
+            headers: {},
+        });
+    http.setClient({ request });
+    const presentation = createPresentation(commonMessages);
+    const lifecycle = installAccessLifecycle(presentation);
+    dispose = () => {
+        lifecycle.dispose();
+        presentation.dispose();
+    };
+    await flushPromises();
+    await lifecycle.verify(true);
+    expect(useAccessStore().status).toBe('guest');
+    reject(new HttpNetworkError('Superseded context request'));
+    await flushPromises();
+    expect(useAccessStore().status).toBe('guest');
+    expect(useAccessStore().stale).toBe(false);
+});
+
+it('keeps pending logout in memory without writing browser storage', async () => {
+    const fixture = setup();
+    await flushPromises();
+    const storage = vi
+        .spyOn(Storage.prototype, 'setItem')
+        .mockImplementation(() => {
+            throw new Error('Storage blocked');
+        });
+    fixture.lifecycle.beginLogout();
+    expect(fixture.access.context).toBeNull();
+    expect(fixture.access.logoutPending).toBe(true);
+    expect(storage).not.toHaveBeenCalled();
+    expect(fixture.access.status).toBe('signingOut');
+});

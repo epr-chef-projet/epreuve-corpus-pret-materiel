@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link, usePage } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 import { LayoutGrid } from '@lucide/vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -16,11 +16,15 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { catalogue, ownRequests, teamRequests, manageCatalog } from '@/routes';
+import { useAccessStore } from '@/modules/identity-access/public/access';
 import type { NavItem } from '@/types';
-const page = usePage();
+const access = useAccessStore();
+const blocked = computed(
+    () => access.status !== 'active' || access.stale || access.confirming,
+);
 const { t } = useI18n();
 const items = computed<NavItem[]>(() => {
-    const role = page.props.auth.user?.role;
+    const role = access.context?.user?.role;
     const result: NavItem[] = [
         { title: t('identity.catalog'), href: catalogue(), icon: LayoutGrid },
     ];
@@ -48,19 +52,21 @@ const items = computed<NavItem[]>(() => {
 
 <template>
     <Sidebar collapsible="icon" variant="inset">
-        <SidebarHeader
+        <SidebarHeader :inert="blocked"
             ><SidebarMenu
                 ><SidebarMenuItem
                     ><SidebarMenuButton size="lg" as-child
                         ><Link
                             :href="
-                                page.props.auth.user?.role === 'borrower'
+                                access.context?.user?.role === 'borrower'
                                     ? catalogue()
                                     : teamRequests()
                             "
                             ><AppLogo /></Link></SidebarMenuButton></SidebarMenuItem></SidebarMenu
         ></SidebarHeader>
-        <SidebarContent><NavMain :items="items" /></SidebarContent>
+        <SidebarContent :inert="blocked"
+            ><NavMain :items="items"
+        /></SidebarContent>
         <SidebarFooter><NavUser /></SidebarFooter>
     </Sidebar>
 </template>

@@ -8,11 +8,14 @@ use App\Infrastructure\Operations\CommandReceipt;
 use App\Infrastructure\Operations\OperationRepository;
 use App\Infrastructure\Operations\OperationScope;
 use App\Infrastructure\Operations\RetrySqlUnit;
-use App\Modules\Catalog\Equipment\Policies\EquipmentPolicy;
+use App\Modules\Catalog\Equipment\Models\Equipment;
 use App\Modules\Catalog\Equipment\UseCases\InvalidateCatalog\PublishCatalogInvalidation;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\EquipmentRepository;
+use App\Modules\Catalog\PublicApi\CatalogAudience;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
+use App\Modules\IdentityAccess\PublicApi\AuthorizeActor;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use LogicException;
@@ -23,7 +26,7 @@ final class ChangeEquipmentStateAction
 
     public const REACTIVATE = 'catalog.equipment.reactivate';
 
-    public function __construct(private SqlUnit $units, private RetrySqlUnit $retry, private OperationRepository $operations, private EquipmentRepository $equipment, private EquipmentStateService $states, private EquipmentPolicy $policy) {}
+    public function __construct(private SqlUnit $units, private RetrySqlUnit $retry, private OperationRepository $operations, private EquipmentRepository $equipment, private EquipmentStateService $states, private AuthorizeActor $authorize) {}
 
     public function handle(ActorContext $actor, string $id, string $operationType, int $expectedVersion, string $operationKey): CommandReceipt
     {
@@ -37,13 +40,14 @@ final class ChangeEquipmentStateAction
             $receipt = null;
             $this->units->forActor($actor, function () use ($actor, $id, $operationType, $expectedVersion, $scope, $hash, $budget, &$receipt): void {
                 $this->retry->limit($budget);
-                $this->policy->create($actor);
+                $this->authorize->handle($actor, 'manage-catalog');
+                Gate::forUser(null)->authorize('viewAny', [Equipment::class, $actor, CatalogAudience::Management]);
                 $receipt = $this->operations->acquire($scope, $hash);
                 if ($receipt !== null) {
                     return;
                 }
                 $equipment = $this->equipment->lock($actor, $id);
-                $this->policy->update($actor, $equipment);
+                Gate::forUser(null)->authorize('update', [$equipment, $actor]);
                 $changed = $this->states->change($equipment, $operationType === self::ARCHIVE ? 'archived' : 'active', $expectedVersion);
                 if ($changed) {
                     $this->equipment->save($actor, $equipment);

@@ -8,6 +8,8 @@ export const useAccessStore = defineStore('identity-access.context', () => {
     const status = ref<
         'checking' | 'active' | 'guest' | 'offline' | 'signingOut'
     >('checking');
+    const logoutPending = ref(false);
+    const logoutSubmitting = ref(false);
     const confirming = ref(true);
     const stale = ref(true);
     const transport = ref<'disconnected' | 'subscribing' | 'subscribed'>(
@@ -62,6 +64,9 @@ export const useAccessStore = defineStore('identity-access.context', () => {
         stale.value = false;
         status.value = value.user ? 'active' : 'guest';
     }
+    function setLogoutPending(value: boolean) {
+        logoutPending.value = value;
+    }
     function confirm() {
         confirming.value = true;
     }
@@ -87,6 +92,9 @@ export const useAccessStore = defineStore('identity-access.context', () => {
         generation,
         status,
         confirming,
+        logoutPending,
+        logoutSubmitting,
+        setLogoutPending,
         stale,
         transport,
         blockedToken,

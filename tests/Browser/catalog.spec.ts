@@ -14,6 +14,12 @@ import {
     type ButtonRender,
 } from './catalogRendering';
 
+declare global {
+    interface Window {
+        catalogRegressions?: string[];
+    }
+}
+
 const accounts = JSON.parse(
     readFileSync('.epr-local/identity-testing.json', 'utf8'),
 ) as {
@@ -730,8 +736,13 @@ test('a newer external version before acknowledgement preserves the confirmed pr
         await other.goto(url);
         await page.route(url, async (route) => {
             if (route.request().method() !== 'PATCH') return route.continue();
-            const response = await route.fetch({ maxRedirects: 0 });
-            expect([302, 303]).toContain(response.status());
+            // Fetch follows the real redirect GET before its computed page is delayed.
+            const response = await route.fetch();
+            expect(response.status()).toBe(200);
+            const redirectedPage: unknown = await response.json();
+            expect(redirectedPage).toMatchObject({
+                props: { equipment: { equipmentVersion: 2 } },
+            });
             committed();
             await held;
             await route.fulfill({ response });
@@ -765,8 +776,48 @@ test('a newer external version before acknowledgement preserves the confirmed pr
                 exact: true,
             }),
         ).toBeVisible({ timeout: 20_000 });
+        await page.evaluate(() => {
+            window.catalogRegressions = [];
+            new MutationObserver(() => {
+                if (
+                    Array.from(document.querySelectorAll('h2')).some(
+                        (heading) =>
+                            heading.textContent?.trim() ===
+                            'My acquired proposal',
+                    )
+                )
+                    window.catalogRegressions?.push(
+                        'An older equipment version was rendered',
+                    );
+            }).observe(document.body, {
+                subtree: true,
+                childList: true,
+                characterData: true,
+            });
+        });
+        const redirected = page.waitForResponse(
+            (response) =>
+                response.url() === url &&
+                response.request().method() === 'PATCH',
+        );
         release();
+        await redirected;
         await expectSaveConfirmation(page);
+        await expect(
+            page.getByRole('button', {
+                name: 'Enregistrer les textes',
+                exact: true,
+            }),
+        ).toBeEnabled();
+        await expect(
+            page.getByRole('heading', {
+                name: 'A later external update',
+                exact: true,
+            }),
+        ).toBeVisible();
+        expect(await page.evaluate(() => window.catalogRegressions)).toEqual(
+            [],
+        );
         await expect(
             page.getByRole('status').filter({
                 hasText: 'La fiche a changé depuis le début de ta saisie.',
@@ -1332,6 +1383,12 @@ test('pagination retains both filters and a new search returns to the first page
         page.getByRole('link', { name: common + ' A', exact: true }),
     ).toBeVisible();
     await page
+        .getByLabel('Fragment du nom', { exact: true })
+        .fill('Not submitted');
+    await page
+        .getByLabel('Catégorie exacte', { exact: true })
+        .fill('Not submitted either');
+    await page
         .getByRole('button', { name: 'Page suivante', exact: true })
         .click();
     await expect(
@@ -1343,6 +1400,24 @@ test('pagination retains both filters and a new search returns to the first page
     await expect(
         page.getByLabel('Catégorie exacte', { exact: true }),
     ).toHaveValue('A03 browser tools');
+    await page
+        .getByLabel('Fragment du nom', { exact: true })
+        .fill('Still not submitted');
+    await page
+        .getByLabel('Catégorie exacte', { exact: true })
+        .fill('Different draft');
+    await page
+        .getByRole('button', { name: 'Page précédente', exact: true })
+        .click();
+    await expect(
+        page.getByRole('link', { name: common + ' A', exact: true }),
+    ).toBeVisible();
+    await page
+        .getByRole('button', { name: 'Page suivante', exact: true })
+        .click();
+    await expect(
+        page.getByRole('link', { name: common + ' B', exact: true }),
+    ).toBeVisible();
     await page
         .getByLabel('Fragment du nom', { exact: true })
         .fill(common + ' A');
@@ -1421,6 +1496,11 @@ for (const [width, locale] of [
         await page.getByLabel('Nom *', { exact: true }).fill(name + ' draft');
         if (locale === 'en')
             await page.getByLabel('Langue de l’interface').selectOption('en');
+        await expect(
+            page.getByLabel(locale === 'fr' ? 'Nom *' : 'Name *', {
+                exact: true,
+            }),
+        ).toHaveValue(name + ' draft');
         const archiveLabel =
             locale === 'fr' ? 'Archiver ce matériel' : 'Archive this equipment';
         const reactivateLabel =
@@ -1444,6 +1524,11 @@ for (const [width, locale] of [
         await page.keyboard.press('Escape');
         await expect(dialog).toHaveCount(0);
         await expect(archiveButton).toBeFocused();
+        await expect(
+            page.getByLabel(locale === 'fr' ? 'Nom *' : 'Name *', {
+                exact: true,
+            }),
+        ).toHaveValue(name + ' draft');
         const unchanged: unknown = await (
             await page.request.get(url + '/lecture')
         ).json();

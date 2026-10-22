@@ -42,6 +42,11 @@ export const commonMessages = {
                 'Les mises à jour en direct sont interrompues. La vérification régulière continue.',
             signingOut:
                 'Votre espace privé est fermé sur cet écran. La sortie du compte doit être confirmée.',
+            logoutPending:
+                'La déconnexion doit encore être confirmée par le serveur.',
+            confirmSignOut: 'Confirmer la déconnexion',
+            logoutMemory:
+                'Gardez cet écran ouvert jusqu’à la confirmation de votre déconnexion.',
             refresh: 'Vérifier mon accès',
         },
         actions: {
@@ -118,6 +123,11 @@ export const commonMessages = {
             degraded: 'Live updates are interrupted. Regular checks continue.',
             signingOut:
                 'Your private screen is closed. Signing out still needs to be confirmed.',
+            logoutPending:
+                'Sign out still needs to be confirmed by the server.',
+            confirmSignOut: 'Confirm sign out',
+            logoutMemory:
+                'Keep this screen open until your sign out is confirmed.',
             refresh: 'Check my access',
         },
         actions: {

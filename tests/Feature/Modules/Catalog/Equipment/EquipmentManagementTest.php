@@ -5,20 +5,28 @@ declare(strict_types=1);
 namespace Tests\Feature\Modules\Catalog\Equipment;
 
 use App\Modules\Catalog\Database\Factories\EquipmentFactory;
+use App\Modules\Catalog\Equipment\Models\Equipment;
+use App\Modules\Catalog\Equipment\Policies\EquipmentPolicy;
+use App\Modules\Catalog\Equipment\UseCases\ChangeEquipmentState\ChangeEquipmentStateAction;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
+use App\Modules\Catalog\Equipment\UseCases\EditEquipmentText\EditEquipmentTextAction;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipmentOperation\ReadEquipmentOperationAction;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInput;
 use App\Modules\Catalog\PublicApi\CatalogAudience;
 use App\Modules\Catalog\PublicApi\EquipmentQuery;
+use App\Modules\Catalog\PublicApi\LockEquipmentBatch;
 use App\Modules\Catalog\PublicApi\ReadEquipmentBatch;
 use App\Modules\Catalog\PublicApi\ReadEquipmentPage;
+use App\Modules\Catalog\PublicApi\ReplaceTotalWithinUnit;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -54,6 +62,7 @@ final class EquipmentManagementTest extends TestCase
 
     public function test_manager_creates_text_and_initial_total_together_with_a_private_receipt(): void
     {
+        $this->assertSame(EquipmentPolicy::class, Gate::policies()[Equipment::class] ?? null);
         $actor = $this->prepare();
         $input = $this->input();
         $response = $this->from('/gestion/materiels/nouveau')->post('/gestion/materiels', $input);
@@ -81,6 +90,60 @@ final class EquipmentManagementTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page->component('Manager/Catalog/Show')->where('commandReceipt.operationKey', $input['operationKey'])->where('commandReceipt.resourceId', $receipt['resourceId'])->where('commandReceipt.resultVersion', 1));
         $this->assertSame(1, DB::table('catalog_equipment')->where('id', $receipt['resourceId'])->count());
         $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $input['operationKey'])->count());
+    }
+
+    #[DataProvider('protectedCommands')]
+    public function test_commands_obey_gate_refusal_without_writing(string $command): void
+    {
+        $actor = $this->prepare();
+        $equipment = EquipmentFactory::new()->createOne(['workshop_id' => $actor->workshopId]);
+        if ($command === 'total') {
+            app(LockEquipmentBatch::class)->handle($actor, [$equipment->id]);
+        }
+        $key = (string) Str::uuid7();
+        Gate::before(
+            /** @param array<array-key, mixed> $arguments */
+            static function (?Authenticatable $user, string $ability, array $arguments): ?bool {
+                return isset($arguments[0]) && ($arguments[0] === Equipment::class || $arguments[0] instanceof Equipment) ? false : null;
+            });
+        try {
+            match ($command) {
+                'create' => app(CreateEquipmentAction::class)->handle($actor, new EquipmentInput('Gate probe', 'Tools', null), 1, $key),
+                'texts' => app(EditEquipmentTextAction::class)->handle($actor, $equipment->id, new EquipmentInput('Gate probe', 'Tools', null), 1, $key),
+                'archive' => app(ChangeEquipmentStateAction::class)->handle($actor, $equipment->id, ChangeEquipmentStateAction::ARCHIVE, 1, $key),
+                'reactivate' => app(ChangeEquipmentStateAction::class)->handle($actor, $equipment->id, ChangeEquipmentStateAction::REACTIVATE, 1, $key),
+                'total' => app(ReplaceTotalWithinUnit::class)->handle($actor, $equipment->id, 2, 1, 0),
+                default => throw new \LogicException('Unknown command'),
+            };
+            $this->fail('The command did not consult Gate.');
+        } catch (AuthorizationException) {
+            $this->assertDatabaseHas('catalog_equipment', ['id' => $equipment->id, 'name' => $equipment->name, 'version' => 1]);
+            $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $key]);
+        }
+    }
+
+    /** @return array<string, array{string}> */
+    public static function protectedCommands(): array
+    {
+        return ['create' => ['create'], 'texts' => ['texts'], 'archive' => ['archive'], 'reactivate' => ['reactivate'], 'total' => ['total']];
+    }
+
+    public function test_registered_policy_uses_the_explicit_context_and_does_not_query_sql(): void
+    {
+        $equipment = EquipmentFactory::new()->make(['workshop_id' => $this->actor()->workshopId]);
+        $queries = [];
+        DB::listen(static function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+        foreach (['atelier-1-manager' => true, 'atelier-1-staff' => false, 'atelier-1-borrower-1' => false] as $login => $allowed) {
+            $actor = $this->actor($login);
+            $gate = Gate::forUser(null);
+            $this->assertSame($allowed, $gate->allows('create', [Equipment::class, $actor]));
+            $this->assertSame($allowed, $gate->allows('update', [$equipment, $actor]));
+            $this->assertSame($allowed, $gate->allows('viewAny', [Equipment::class, $actor, CatalogAudience::Management]));
+            $this->assertTrue($gate->allows('viewAny', [Equipment::class, $actor, CatalogAudience::Catalog]));
+        }
+        $this->assertSame([], $queries);
     }
 
     public function test_a_confirmation_reference_cannot_confirm_another_equipment_or_another_workshops_operation(): void
@@ -271,9 +334,21 @@ final class EquipmentManagementTest extends TestCase
         $this->assertSqlRejects(fn () => EquipmentFactory::new()->createOne(['workshop_id' => $actor->workshopId, 'total_quantity' => -1]), '23514');
         $this->assertSqlRejects(fn () => EquipmentFactory::new()->createOne(['workshop_id' => $actor->workshopId, 'name' => "\u{00a0}\u{2009}\u{3000}"]), '23514');
         $this->assertSqlRejects(function () use ($actor): void {
-            DB::select("SELECT set_config('epr.workshop_id','',true),set_config('epr.actor_id','',true)");
+            DB::select("SELECT set_config('epr.actor_id','',true)");
             EquipmentFactory::new()->createOne(['workshop_id' => $actor->workshopId]);
         }, '42501');
+        $connection = DB::connectUsing('catalog_missing_actor', config('database.connections.pgsql'));
+        try {
+            $connection->beginTransaction();
+            $connection->select("SELECT set_config('epr.workshop_id', ?, true), set_config('epr.actor_role', 'manager', true)", [$actor->workshopId]);
+            $this->assertNull($connection->selectOne("SELECT current_setting('epr.actor_id', true) AS actor")->actor);
+            $this->assertSqlRejects(function () use ($actor): void {
+                EquipmentFactory::new()->makeOne(['workshop_id' => $actor->workshopId])->setConnection('catalog_missing_actor')->save();
+            }, '42501');
+        } finally {
+            $connection->rollBack();
+            DB::purge('catalog_missing_actor');
+        }
     }
 
     public function test_saturated_versions_and_cross_workshop_receipt_links_are_refused_without_partial_changes(): void

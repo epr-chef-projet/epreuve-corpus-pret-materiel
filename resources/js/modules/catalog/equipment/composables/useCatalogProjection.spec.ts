@@ -257,3 +257,40 @@ it('refuses an overflowed snapshot and discards a response after access ends', a
     await vi.advanceTimersByTimeAsync(0);
     expect(state.projection.data.value).toBe('initial');
 });
+
+it('keeps a newer equipment version when an older Inertia page and read arrive late', async () => {
+    const initial = ref({ equipmentVersion: 1, name: 'first' });
+    const replies: ((value: typeof initial.value) => void)[] = [];
+    let projection!: ReturnType<
+        typeof useCatalogProjection<typeof initial.value>
+    >;
+    wrapper = mount(
+        defineComponent({
+            setup() {
+                projection = useCatalogProjection(
+                    initial,
+                    () => 'same-equipment',
+                    () => new Promise((resolve) => replies.push(resolve)),
+                    (incoming, current) =>
+                        incoming.equipmentVersion >= current.equipmentVersion,
+                );
+                return () => null;
+            },
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    replies[0]({ equipmentVersion: 3, name: 'newest' });
+    await vi.advanceTimersByTimeAsync(0);
+    initial.value = { equipmentVersion: 2, name: 'older redirect' };
+    await vi.advanceTimersByTimeAsync(0);
+    expect(projection.data.value).toEqual({
+        equipmentVersion: 3,
+        name: 'newest',
+    });
+    replies[1]({ equipmentVersion: 2, name: 'older read' });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(projection.data.value.equipmentVersion).toBe(3);
+    replies[2]({ equipmentVersion: 4, name: 'fresh read' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(projection.data.value.equipmentVersion).toBe(4);
+});

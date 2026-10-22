@@ -22,6 +22,8 @@ const projection = useCatalogProjection(
     toRef(props, 'initialEquipment'),
     () => props.initialEquipment.equipmentId,
     (signal) => readEquipment(props.initialEquipment.equipmentId, signal),
+    (incoming, current) =>
+        incoming.equipmentVersion >= current.equipmentVersion,
 );
 </script>
 

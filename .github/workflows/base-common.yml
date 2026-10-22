@@ -635,12 +635,16 @@ jobs:
                     "cache" => config("cache.default"), "scaling" => config("reverb.servers.reverb.scaling.enabled")], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n";
                   ' > "$RUNNER_TEMP/image-proof/reverb-config.json"
                   export QUALIFIED_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$EPR_IMAGE")
+                  export QUALIFIED_WORKER_IMAGE_ID=$(docker inspect --format '{{.Image}}' "$("${image_compose[@]}" ps -q image-horizon)")
+                  test "$QUALIFIED_WORKER_IMAGE_ID" = "$QUALIFIED_IMAGE_ID"
                   (
                     set +e
                     python3 - <<'PYREVERB' > "$RUNNER_TEMP/image-proof/reverb-protocol.jsonl" 2> "$RUNNER_TEMP/image-proof/reverb-protocol.stderr"
-                  import base64, hashlib, json, os, socket, struct, time
+                  import base64, hashlib, http.cookiejar, json, os, socket, struct, time, uuid
+                  from urllib.error import HTTPError
+                  from urllib.request import build_opener, ProxyHandler, HTTPCookieProcessor, HTTPRedirectHandler, Request
                   from pathlib import Path
-                  from urllib.parse import urlsplit
+                  from urllib.parse import urlsplit, unquote, urlencode
                   root = Path(os.environ['RUNNER_TEMP'])
                   config = json.loads((root / 'image-proof' / 'reverb-config.json').read_text())
                   origin = config['appUrl']
@@ -684,6 +688,78 @@ jobs:
                       assert len(payload) == length
                       return opcode, payload
 
+                  def send(connection, value):
+                      payload = json.dumps(value).encode()
+                      assert len(payload) < 16384
+                      mask = os.urandom(4)
+                      head = bytes([129, 128 | len(payload)]) if len(payload) < 126 else bytes([129, 254]) + struct.pack('!H', len(payload))
+                      connection.sendall(head + mask + bytes(value ^ mask[index % 4] for index, value in enumerate(payload)))
+
+                  class NoRedirect(HTTPRedirectHandler):
+                      def redirect_request(self, request, response, code, message, headers, location):
+                          return None
+
+                  cookies = http.cookiejar.CookieJar()
+                  opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(cookies), NoRedirect())
+                  def request(path, data=None, accept='application/json'):
+                      headers = {'Host': urlsplit(origin).netloc, 'Origin': origin, 'Accept': accept}
+                      for cookie in cookies:
+                          if cookie.name == 'XSRF-TOKEN': headers['X-XSRF-TOKEN'] = unquote(cookie.value)
+                      body = None
+                      if data is not None:
+                          headers['Content-Type'] = 'application/json'
+                          body = json.dumps(data).encode()
+                      try:
+                          response = opener.open(Request('http://127.0.0.1:8183' + path, data=body, headers=headers), timeout=10)
+                      except HTTPError as response_error:
+                          response = response_error
+                      with response:
+                          payload = response.read(1024 * 1024)
+                          assert len(payload) < 1024 * 1024
+                          return response.status, payload
+
+                  def private_catalog_notification(connection, stream, socket_id):
+                      accounts = json.loads(Path('.epr-local/identity-laravel.json').read_text())
+                      manager = next(user for user in accounts['users'] if user['login'] == 'atelier-1-manager')
+                      assert request('/login', accept='text/html')[0] == 200
+                      assert request('/login', {'login': manager['login'], 'password': accounts['password']})[0] == 200
+                      status, payload = request('/access/context')
+                      context = json.loads(payload)
+                      assert status == 200 and context['user']['id'] == manager['id'] and context['user']['role'] == 'manager'
+                      channel = 'private-epr.session.' + context['broadcastToken']
+                      status, payload = request('/broadcasting/auth', {'socket_id': socket_id, 'channel_name': channel})
+                      assert status == 200
+                      auth = json.loads(payload)['auth']
+                      send(connection, {'event': 'pusher:subscribe', 'data': {'channel': channel, 'auth': auth}})
+                      opcode, payload = frame(stream)
+                      event = json.loads(payload)
+                      assert opcode == 1 and event['event'] == 'pusher_internal:subscription_succeeded' and event['channel'] == channel
+                      operation_key = str(uuid.uuid4())
+                      status, _ = request('/gestion/materiels', {'name': 'Image notification ' + operation_key, 'category': 'Qualification', 'description': None, 'totalQuantity': 1, 'operationKey': operation_key})
+                      assert status == 302, 'Catalog mutation was not accepted'
+                      status, payload = request('/gestion/materiels/operations?' + urlencode({'operationType': 'catalog.equipment.create', 'operationKey': operation_key}))
+                      receipt = json.loads(payload)
+                      assert status == 200 and receipt['status'] == 'applied' and receipt['receipt']['resultVersion'] == 1
+                      deadline = time.monotonic() + 15
+                      while time.monotonic() < deadline:
+                          connection.settimeout(max(0.1, deadline - time.monotonic()))
+                          opcode, payload = frame(stream)
+                          assert opcode == 1, 'Private notification connection closed'
+                          event = json.loads(payload)
+                          if event['event'] == 'pusher:ping':
+                              send(connection, {'event': 'pusher:pong', 'data': {}})
+                              continue
+                          assert event['event'] == 'epr.notification' and event['channel'] == channel
+                          envelope = json.loads(event['data']) if isinstance(event['data'], str) else event['data']
+                          assert envelope['type'] == 'catalog.invalidated' and envelope['contractVersion'] == 1 and envelope['authGeneration'] == context['authGeneration']
+                          uuid.UUID(envelope['eventId'])
+                          if envelope['payload'] != {'projection': 'catalogManagement'}: continue
+                          proof = {'imageId': os.environ['QUALIFIED_IMAGE_ID'], 'sourceSha': os.environ['EXPECTED_SOURCE'], 'nativeExit': 0, 'workerService': 'image-horizon', 'workerImageId': os.environ['QUALIFIED_WORKER_IMAGE_ID'], 'privateChannel': True, 'notificationReceived': True, 'operationKey': operation_key, 'resourceId': receipt['receipt']['resourceId'], 'type': envelope['type'], 'projection': envelope['payload']['projection']}
+                          (root / 'image-proof/catalog-notifications.json').write_text(json.dumps(proof, indent=2) + '\n')
+                          record(privateNotificationReceived=True, workerService='image-horizon')
+                          return
+                      raise AssertionError('The image worker did not deliver the private Catalog notification')
+
                   accepted, accepted_stream = connect(origin)
                   try:
                       opcode, payload = frame(accepted_stream)
@@ -693,6 +769,7 @@ jobs:
                       assert isinstance(data['socket_id'], str) and data['socket_id']
                       assert data['activity_timeout'] == config['activityTimeout']
                       record(origin=origin, event=event['event'], socketId=data['socket_id'], activityTimeout=data['activity_timeout'])
+                      accepted_socket_id = data['socket_id']
                       foreign_origin = 'http://foreign.invalid:8183'
                       foreign, foreign_stream = connect(foreign_origin)
                       try:
@@ -704,10 +781,17 @@ jobs:
                       finally:
                           foreign_stream.close()
                           foreign.close()
+                      private_catalog_notification(accepted, accepted_stream, accepted_socket_id)
                       (root / 'reverb-ready').touch()
-                      accepted.settimeout(240)
-                      opcode, payload = frame(accepted_stream)
-                      assert opcode == 8, 'Accepted connection did not close at service stop'
+                      stop_deadline = time.monotonic() + 240
+                      while time.monotonic() < stop_deadline:
+                          accepted.settimeout(max(0.1, stop_deadline - time.monotonic()))
+                          opcode, payload = frame(accepted_stream)
+                          if opcode == 8: break
+                          assert opcode == 1 and json.loads(payload)['event'] == 'pusher:ping'
+                          send(accepted, {'event': 'pusher:pong', 'data': {}})
+                      else:
+                          raise AssertionError('Accepted connection did not close at service stop')
                       record(origin=origin, acceptedConnectionClosed=True)
                       (root / 'reverb-closed').touch()
                   finally:
@@ -718,7 +802,7 @@ jobs:
                     printf '%s\n' "$native" > "$RUNNER_TEMP/reverb-native"
                     exit "$native"
                   ) > /dev/null 2>&1 < /dev/null &
-                  for attempt in {1..100}; do
+                  for attempt in {1..300}; do
                     if test -f "$RUNNER_TEMP/reverb-ready"; then break; fi
                     if test -f "$RUNNER_TEMP/reverb-native"; then cat "$RUNNER_TEMP/image-proof/reverb-protocol.stderr"; exit 1; fi
                     sleep 0.1
@@ -918,6 +1002,13 @@ jobs:
                       && ($media['nativeExit'] ?? null) === 0 && ($pdf['nativeExit'] ?? null) === 0
                       && ($media['files'] ?? null) === ['tests/Feature/Foundation/ImageEngineTest.php', 'tests/Feature/Foundation/PdfEngineTest.php']
                       && ($pdf['productionDependenciesOnly'] ?? false) && ($pdf['embeddedTrueType'] ?? false) && ($pdf['scriptsDisabled'] ?? false);
+                  $notificationPath = getenv('EPR_IMAGE_PROOF').'/catalog-notifications.json';
+                  $notification = is_file($notificationPath) ? json_decode(file_get_contents($notificationPath), true, 512, JSON_THROW_ON_ERROR) : [];
+                  $notificationValid = is_string($imageId) && ($notification['imageId'] ?? null) === $imageId
+                      && ($notification['sourceSha'] ?? null) === getenv('EXPECTED_SOURCE') && ($notification['nativeExit'] ?? null) === 0
+                      && ($notification['workerService'] ?? null) === 'image-horizon' && ($notification['workerImageId'] ?? null) === $imageId && ($notification['privateChannel'] ?? false) === true
+                      && ($notification['notificationReceived'] ?? false) === true && ($notification['type'] ?? null) === 'catalog.invalidated'
+                      && ($notification['projection'] ?? null) === 'catalogManagement';
                   $valid = getenv('RECEIPT_SHA') === getenv('EXPECTED_SOURCE') && getenv('RECEIPT_UNCHANGED') === 'true'
                       && count(array_filter($stages, fn ($result) => $result !== 'success')) === 0
                       && ($prepared['root'] ?? null) === getenv('RECEIPT_ROOT')
@@ -925,14 +1016,14 @@ jobs:
                       && ($prepared['image'] ?? null) === getenv('RECEIPT_RUNTIME')
                       && ($prepared['source'] ?? null) === getenv('RECEIPT_SOURCE')
                       && is_file('.epr-local/image-checked') && is_file('.epr-local/image-stopped') && is_file('.epr-local/stopped')
-                      && $mediaValid && $identityValid
+                      && $mediaValid && $identityValid && $notificationValid
                       && array_column($checks, 'control') === $expected
                       && count(array_filter($checks, fn ($row) => $row['nativeExit'] !== 0)) === 0;
                   $receipt = ['repository' => getenv('GITHUB_REPOSITORY'), 'workflowRef' => getenv('GITHUB_WORKFLOW_REF'),
                       'workflowSha' => getenv('GITHUB_WORKFLOW_SHA'), 'sha' => getenv('RECEIPT_SHA'), 'expectedSha' => getenv('EXPECTED_SOURCE'),
                       'run' => getenv('GITHUB_RUN_ID'), 'attempt' => getenv('GITHUB_RUN_ATTEMPT'), 'profile' => 'local',
                       'project' => $prepared['project'] ?? null, 'stages' => $stages, 'required' => $expected, 'checks' => $checks,
-                      'validated' => $valid, 'imageId' => $imageId, 'configDigest' => $identity['configDigest'] ?? null, 'mediaValidated' => $mediaValid, 'runtimeId' => getenv('RECEIPT_RUNTIME'), 'runtimeSource' => getenv('RECEIPT_SOURCE'),
+                      'validated' => $valid, 'imageId' => $imageId, 'configDigest' => $identity['configDigest'] ?? null, 'mediaValidated' => $mediaValid, 'notificationValidated' => $notificationValid, 'runtimeId' => getenv('RECEIPT_RUNTIME'), 'runtimeSource' => getenv('RECEIPT_SOURCE'),
                       'locks' => array_combine(['composer.lock', 'package-lock.json'], array_map('hash_file', ['sha256', 'sha256'], ['composer.lock', 'package-lock.json']))];
                   file_put_contents('.epr-local/base-receipt.json', json_encode($receipt, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n");
                   file_put_contents('.epr-local/receipt-output', 'validated='.($valid ? 'true' : 'false')."\nsha=".$receipt['sha']."\nrun=".$receipt['run']."\nattempt=".$receipt['attempt']."\n");

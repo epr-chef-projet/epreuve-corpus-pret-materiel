@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\PublicApi;
 
+use App\Modules\Catalog\Equipment\Models\Equipment;
 use App\Modules\Catalog\Equipment\UseCases\LockEquipment\EquipmentLockRepository;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\ResolveActor;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -35,6 +37,7 @@ final class LockEquipmentBatch
         }
         $this->units->assertActor(DB::connection('pgsql'), $actor);
         $this->actors->assertCurrent($actor);
+        Gate::forUser(null)->authorize('viewAny', [Equipment::class, $actor, CatalogAudience::Catalog]);
 
         return $this->locks->acquire($actor, $ids);
     }

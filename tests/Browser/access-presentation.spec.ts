@@ -306,6 +306,10 @@ test('HTTP loss and resume keep the limits visible without replaying a mutation'
     await expect(
         page.getByRole('status').filter({ hasText: 'Connexion interrompue' }),
     ).toBeVisible();
+    await page.getByLabel('Langue de l’interface').click();
+    await page.getByLabel('Langue de l’interface').selectOption('en');
+    await expect(page.getByLabel('Interface language')).toBeEnabled();
+    await page.getByLabel('Interface language').selectOption('fr');
     await context.setOffline(false);
     await expect(
         page
@@ -316,6 +320,68 @@ test('HTTP loss and resume keep the limits visible without replaying a mutation'
         page.getByRole('status').filter({ hasText: 'Connexion interrompue' }),
     ).toHaveCount(0);
     expect(posts).toBe(0);
+});
+
+test('offline logout clears both tabs locally and requires explicit server confirmation', async ({
+    page,
+    context,
+}) => {
+    await signIn(page);
+    const other = await context.newPage();
+    await other.goto('/dashboard');
+    await expect(
+        other
+            .getByText(accounts.users[borrower].displayName, { exact: true })
+            .first(),
+    ).toBeVisible();
+    const posts: string[] = [];
+    page.on('request', (request) => {
+        if (request.method() === 'POST' && request.url().endsWith('/logout'))
+            posts.push(request.url());
+    });
+    await context.setOffline(true);
+    await expect(
+        page.getByRole('status').filter({ hasText: 'Connexion interrompue' }),
+    ).toBeVisible();
+    await page.getByTestId('sidebar-menu-button').click();
+    await page.getByTestId('logout-button').click();
+    for (const tab of [page, other]) {
+        await expect(
+            tab.getByText(accounts.users[borrower].displayName, {
+                exact: true,
+            }),
+        ).toHaveCount(0);
+        await expect(
+            tab.getByRole('status').filter({
+                hasText:
+                    'La déconnexion doit encore être confirmée par le serveur.',
+            }),
+        ).toBeVisible();
+    }
+    await page.getByLabel('Langue de l’interface').selectOption('en');
+    await expect(
+        page.getByRole('button', { name: 'Confirm sign out', exact: true }),
+    ).toBeVisible();
+    const checked = page.waitForResponse(
+        (response) =>
+            response.url().endsWith('/access/context') &&
+            response.status() === 200,
+    );
+    await context.setOffline(false);
+    await checked;
+    await expect(
+        page.getByText(accounts.users[borrower].displayName, { exact: true }),
+    ).toHaveCount(0);
+    expect(posts).toHaveLength(1);
+    await page
+        .getByRole('button', { name: 'Confirm sign out', exact: true })
+        .click();
+    await expect(page).toHaveURL(/\/$/);
+    await page.goto('/dashboard');
+    await expect(page).toHaveURL(/\/login$/);
+    await other.goto('/dashboard');
+    await expect(other).toHaveURL(/\/login$/);
+    expect(posts).toHaveLength(2);
 });
 
 test('phone, keyboard and enlarged English layout keep essential controls available', async ({

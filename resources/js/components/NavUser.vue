@@ -13,11 +13,15 @@ import {
     SidebarMenuItem,
     useSidebar,
 } from '@/components/ui/sidebar';
+import { useAccessStore } from '@/modules/identity-access/public/access';
 import UserInfo from '@/components/UserInfo.vue';
 import UserMenuContent from '@/components/UserMenuContent.vue';
 
 const page = usePage();
-const user = computed(() => page.props.auth.user);
+const access = useAccessStore();
+const user = computed(() =>
+    access.matchesContext(page.props.auth) ? access.context?.user : null,
+);
 const { isMobile, state } = useSidebar();
 </script>
 

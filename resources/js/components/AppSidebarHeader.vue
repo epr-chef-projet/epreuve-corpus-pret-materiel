@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
 import { SidebarTrigger } from '@/components/ui/sidebar';
+import { useAccessStore } from '@/modules/identity-access/public/access';
 import type { BreadcrumbItem } from '@/types';
+
+const access = useAccessStore();
 
 withDefaults(
     defineProps<{
@@ -19,9 +22,20 @@ withDefaults(
     >
         <div class="flex items-center gap-2">
             <SidebarTrigger class="-ml-1" />
-            <template v-if="breadcrumbs && breadcrumbs.length > 0">
+            <div
+                v-if="
+                    access.context?.user &&
+                    breadcrumbs &&
+                    breadcrumbs.length > 0
+                "
+                :inert="
+                    access.status !== 'active' ||
+                    access.stale ||
+                    access.confirming
+                "
+            >
                 <Breadcrumbs :breadcrumbs="breadcrumbs" />
-            </template>
+            </div>
         </div>
     </header>
 </template>

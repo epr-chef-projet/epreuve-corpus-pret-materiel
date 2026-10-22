@@ -42,7 +42,7 @@ ALTER TABLE epr.catalog_equipment ENABLE ROW LEVEL SECURITY;
 ALTER TABLE epr.catalog_equipment FORCE ROW LEVEL SECURITY;
 CREATE POLICY catalog_equipment_actor ON epr.catalog_equipment TO epr_app
     USING (workshop_id = nullif(current_setting('epr.workshop_id', true), '')::uuid AND nullif(current_setting('epr.actor_id', true), '')::uuid IS NOT NULL AND current_setting('epr.actor_role', true) IN ('borrower', 'staff', 'manager'))
-    WITH CHECK (workshop_id = nullif(current_setting('epr.workshop_id', true), '')::uuid AND current_setting('epr.actor_role', true) = 'manager');
+    WITH CHECK (workshop_id = nullif(current_setting('epr.workshop_id', true), '')::uuid AND nullif(current_setting('epr.actor_id', true), '')::uuid IS NOT NULL AND current_setting('epr.actor_role', true) = 'manager');
 REVOKE ALL ON epr.catalog_equipment FROM PUBLIC, epr_app, epr_auth_lookup;
 GRANT SELECT, INSERT, UPDATE ON epr.catalog_equipment TO epr_app;
 CREATE INDEX catalog_equipment_search_index ON epr.catalog_equipment USING gin (lower(name) epr.gin_trgm_ops);

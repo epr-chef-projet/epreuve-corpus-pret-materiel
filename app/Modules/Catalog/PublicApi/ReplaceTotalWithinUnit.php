@@ -4,19 +4,21 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\PublicApi;
 
-use App\Modules\Catalog\Equipment\Policies\EquipmentPolicy;
+use App\Modules\Catalog\Equipment\Models\Equipment;
 use App\Modules\Catalog\Equipment\UseCases\InvalidateCatalog\PublishCatalogInvalidation;
 use App\Modules\Catalog\Equipment\UseCases\LockEquipment\EquipmentLockRepository;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\EquipmentRepository;
 use App\Modules\Catalog\Equipment\UseCases\ReplaceEquipmentTotal\EquipmentTotalService;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
+use App\Modules\IdentityAccess\PublicApi\AuthorizeActor;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 /** No independent transaction or receipt: WorkshopOperations owns the command and protected minimum. */
 final class ReplaceTotalWithinUnit
 {
-    public function __construct(private EquipmentLockRepository $locks, private EquipmentRepository $equipment, private EquipmentPolicy $policy, private EquipmentTotalService $totals) {}
+    public function __construct(private EquipmentLockRepository $locks, private EquipmentRepository $equipment, private AuthorizeActor $authorize, private EquipmentTotalService $totals) {}
 
     public function handle(ActorContext $actor, string $equipmentId, int $totalQuantity, int $expectedVersion, int $minimumCommittedQuantity): int
     {
@@ -24,9 +26,10 @@ final class ReplaceTotalWithinUnit
             throw new InvalidArgumentException('Invalid equipment, total, version or protected minimum.');
         }
         $this->locks->assertProtected($actor, $equipmentId);
-        $this->policy->create($actor);
+        $this->authorize->handle($actor, 'manage-catalog');
+        Gate::forUser(null)->authorize('viewAny', [Equipment::class, $actor, CatalogAudience::Management]);
         $equipment = $this->equipment->lock($actor, $equipmentId);
-        $this->policy->update($actor, $equipment);
+        Gate::forUser(null)->authorize('update', [$equipment, $actor]);
         $this->totals->replace($equipment, $totalQuantity, $expectedVersion, $minimumCommittedQuantity);
         $this->equipment->save($actor, $equipment);
         PublishCatalogInvalidation::dispatch($actor->workshopId)->afterCommit();

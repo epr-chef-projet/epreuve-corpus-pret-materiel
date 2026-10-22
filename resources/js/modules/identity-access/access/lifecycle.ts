@@ -1,6 +1,7 @@
 import { http, HttpCancelledError, HttpNetworkError } from '@inertiajs/core';
 import { router, usePage } from '@inertiajs/vue3';
 import { watch } from 'vue';
+import { logout } from '@/routes';
 import type { Presentation } from '@/shared/i18n/presentation';
 import { isContextRequest, readContext } from './requests/readContext';
 import { useAccessStore } from './stores/useAccessStore';
@@ -53,7 +54,8 @@ export function installAccessLifecycle(presentation: Presentation) {
             } catch (error) {
                 if (generation !== access.generation)
                     throw new HttpCancelledError();
-                if (error instanceof HttpNetworkError) access.offline();
+                if (error instanceof HttpNetworkError && !abort.signal.aborted)
+                    access.offline();
                 throw error;
             } finally {
                 release();
@@ -117,6 +119,8 @@ export function installAccessLifecycle(presentation: Presentation) {
             const data = await readContext(abort.signal);
             if (current !== sequence || generation !== access.generation)
                 return;
+            if (access.logoutPending && data.user) return;
+            if (access.logoutPending) access.setLogoutPending(false);
             if (
                 locked &&
                 data.user &&
@@ -156,6 +160,7 @@ export function installAccessLifecycle(presentation: Presentation) {
     function receive(event: MessageEvent<unknown>) {
         if (event.data !== 'blocked' && event.data !== 'changed') return;
         locked = event.data === 'blocked';
+        if (locked) access.setLogoutPending(true);
         invalidate(locked);
         if (!locked)
             void verify(true).then(() => {
@@ -167,15 +172,34 @@ export function installAccessLifecycle(presentation: Presentation) {
     channel?.addEventListener('message', receive);
     function beginLogout() {
         locked = true;
+        access.setLogoutPending(true);
         invalidate(true);
         channel?.postMessage('blocked');
     }
     function finishLogout() {
-        locked = false;
         channel?.postMessage('changed');
         void verify(true);
     }
+    function signOut() {
+        if (access.logoutSubmitting) return;
+        beginLogout();
+        access.logoutSubmitting = true;
+        router.post(
+            logout.url(),
+            {},
+            {
+                onSuccess: finishLogout,
+                onNetworkError: () => {
+                    access.logoutSubmitting = false;
+                },
+                onFinish: () => {
+                    access.logoutSubmitting = false;
+                },
+            },
+        );
+    }
     async function resumeAccess() {
+        if (access.logoutPending) return;
         locked = false;
         access.allowResume();
         await verify(true);
@@ -188,6 +212,10 @@ export function installAccessLifecycle(presentation: Presentation) {
     const before = router.on('beforeUpdate', (event) => {
         const auth = event.detail.page.props.auth;
         if (!auth) return;
+        if (access.logoutPending && auth.user) {
+            void verify(true);
+            return;
+        }
         if (
             access.context ? !access.matchesContext(auth) : Boolean(auth?.user)
         ) {
@@ -228,6 +256,7 @@ export function installAccessLifecycle(presentation: Presentation) {
         resumeAccess,
         beginLogout,
         finishLogout,
+        signOut,
         dispose() {
             disposed = true;
             sequence++;

@@ -57,6 +57,13 @@ const projection = useCatalogProjection(
     toRef(props, 'initialPage'),
     () => JSON.stringify(props.query),
     (signal) => readEquipmentPage(props.query, signal),
+    (incoming, current) =>
+        incoming.items.every((item) => {
+            const known = current.items.find(
+                (row) => row.equipmentId === item.equipmentId,
+            );
+            return !known || item.equipmentVersion >= known.equipmentVersion;
+        }),
 );
 const rows = computed(() => projection.data.value.items);
 function visit(
@@ -64,13 +71,15 @@ function visit(
     action: NonNullable<typeof activeVisit.value> = 'search',
 ) {
     if (activeVisit.value || generation !== access.generation) return;
+    const criteria =
+        action === 'previous' || action === 'next' ? props.query : fields;
     const id = ++visitId;
     activeVisit.value = action;
     router.get(
         manageCatalog.url(),
         {
-            search: fields.search,
-            category: fields.category || undefined,
+            search: criteria.search,
+            category: criteria.category || undefined,
             page,
             perPage: props.query.perPage,
         },

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\PublicApi;
 
+use App\Modules\Catalog\Equipment\Models\Equipment;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\EquipmentRepository;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -33,6 +35,7 @@ final class ReadEquipmentBatch
         }
         $result = [];
         $this->units->forActorRead($actor, function () use ($actor, $ids, &$result): void {
+            Gate::forUser(null)->authorize('viewAny', [Equipment::class, $actor, CatalogAudience::Catalog]);
             $result = $this->equipment->batch($actor, $ids);
         });
 

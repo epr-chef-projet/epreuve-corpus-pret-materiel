@@ -48,36 +48,56 @@ watch(
         </div>
         <div
             v-if="!ownsPage || access.confirming"
-            class="flex min-h-svh flex-col items-center justify-center gap-4 p-6"
+            class="flex min-h-64 flex-col items-center justify-center gap-4 p-6"
         >
             <p role="status">
                 {{
                     t(
-                        access.status === 'guest'
-                            ? 'issues.identity_access.authentication_required'
-                            : access.status === 'offline'
-                              ? 'common.offline'
-                              : access.status === 'signingOut'
-                                ? 'common.signingOut'
-                                : 'common.checking',
+                        access.logoutPending
+                            ? 'common.logoutPending'
+                            : access.status === 'guest'
+                              ? 'issues.identity_access.authentication_required'
+                              : access.status === 'offline'
+                                ? 'common.offline'
+                                : access.status === 'signingOut'
+                                  ? 'common.signingOut'
+                                  : 'common.checking',
                     )
                 }}
+            </p>
+            <p v-if="access.logoutPending" role="status">
+                {{ t('common.logoutMemory') }}
             </p>
             <button
                 class="rounded-md border px-4 py-2"
                 type="button"
-                @click="lifecycle?.resumeAccess()"
+                :disabled="access.logoutSubmitting"
+                @click="
+                    access.logoutPending
+                        ? lifecycle?.signOut()
+                        : lifecycle?.resumeAccess()
+                "
             >
-                {{ t('common.refresh') }}
+                {{
+                    t(
+                        access.logoutPending
+                            ? 'common.confirmSignOut'
+                            : 'common.refresh',
+                    )
+                }}
             </button>
             <Link v-if="access.status === 'guest'" :href="login()">{{
                 t('identity.signIn')
             }}</Link>
         </div>
         <p
-            v-if="ownsPage && (access.status === 'offline' || access.stale)"
+            v-if="
+                ownsPage &&
+                !access.confirming &&
+                (access.status === 'offline' || access.stale)
+            "
             role="status"
-            class="fixed inset-x-0 bottom-0 border-t bg-background p-4 text-center"
+            class="border-t bg-background p-4 text-center"
         >
             {{
                 t(

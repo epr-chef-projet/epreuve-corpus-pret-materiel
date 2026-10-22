@@ -8,13 +8,16 @@ use App\Infrastructure\Operations\CommandReceipt;
 use App\Infrastructure\Operations\OperationRepository;
 use App\Infrastructure\Operations\OperationScope;
 use App\Infrastructure\Operations\RetrySqlUnit;
-use App\Modules\Catalog\Equipment\Policies\EquipmentPolicy;
+use App\Modules\Catalog\Equipment\Models\Equipment;
 use App\Modules\Catalog\Equipment\UseCases\InvalidateCatalog\PublishCatalogInvalidation;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\EquipmentRepository;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInput;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentTextService;
+use App\Modules\Catalog\PublicApi\CatalogAudience;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
+use App\Modules\IdentityAccess\PublicApi\AuthorizeActor;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -22,7 +25,7 @@ final class EditEquipmentTextAction
 {
     public const OPERATION = 'catalog.equipment.update_text';
 
-    public function __construct(private SqlUnit $units, private RetrySqlUnit $retry, private OperationRepository $operations, private EquipmentRepository $equipment, private EquipmentTextService $text, private EquipmentPolicy $policy) {}
+    public function __construct(private SqlUnit $units, private RetrySqlUnit $retry, private OperationRepository $operations, private EquipmentRepository $equipment, private EquipmentTextService $text, private AuthorizeActor $authorize) {}
 
     public function handle(ActorContext $actor, string $id, EquipmentInput $input, int $expectedVersion, string $operationKey): CommandReceipt
     {
@@ -37,13 +40,14 @@ final class EditEquipmentTextAction
             $receipt = null;
             $this->units->forActor($actor, function () use ($actor, $id, $input, $expectedVersion, $scope, $hash, $budget, &$receipt): void {
                 $this->retry->limit($budget);
-                $this->policy->create($actor);
+                $this->authorize->handle($actor, 'manage-catalog');
+                Gate::forUser(null)->authorize('viewAny', [Equipment::class, $actor, CatalogAudience::Management]);
                 $receipt = $this->operations->acquire($scope, $hash);
                 if ($receipt !== null) {
                     return;
                 }
                 $equipment = $this->equipment->lock($actor, $id);
-                $this->policy->update($actor, $equipment);
+                Gate::forUser(null)->authorize('update', [$equipment, $actor]);
                 $this->text->revise($equipment, $input, $expectedVersion);
                 $this->equipment->save($actor, $equipment);
                 $receipt = $this->operations->record($scope, $hash, $equipment->id, $equipment->version, now()->utc()->format('Y-m-d\TH:i:s.v\Z'));

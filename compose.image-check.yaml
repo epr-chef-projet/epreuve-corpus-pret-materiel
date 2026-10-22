@@ -35,6 +35,15 @@ x-application: &application
     CACHE_STORE: redis
     CACHE_PREFIX: '${IMAGE_INSTANCE}_image_cache_'
     QUEUE_CONNECTION: redis
+    SESSION_DRIVER: redis
+    SESSION_CONNECTION: sessions
+    BROADCAST_CONNECTION: reverb
+    REVERB_APP_ID: '${IMAGE_INSTANCE}'
+    REVERB_APP_KEY: '${IMAGE_REVERB_KEY:?Public Reverb key required}'
+    REVERB_APP_SECRET: '${IMAGE_REVERB_SECRET:?Private Reverb secret required}'
+    REVERB_HOST: image-reverb
+    REVERB_PORT: 8080
+    REVERB_SCHEME: http
 
 services:
     web:
@@ -68,14 +77,11 @@ services:
         environment:
             <<: *application
             AUTH_LOOKUP_PASSWORD: '${IMAGE_AUTH_LOOKUP_PASSWORD:?Authentication SQL credential required}'
-            SESSION_DRIVER: redis
-            SESSION_CONNECTION: sessions
             SESSION_COOKIE: '${IMAGE_INSTANCE}_image_session'
             SESSION_SECURE_COOKIE: 'false'
             MAIL_MAILER: smtp
             MAIL_HOST: mailpit
             MAIL_PORT: 1025
-            REVERB_APP_KEY: '${IMAGE_REVERB_KEY:?Public Reverb key required}'
             REVERB_PUBLIC_HOST: '${IMAGE_PUBLIC_HOST:?Public Reverb host required}'
             REVERB_PUBLIC_PORT: '${IMAGE_REVERB_PORT:?Owned Reverb port required}'
             REVERB_PUBLIC_SCHEME: http
@@ -88,7 +94,10 @@ services:
         <<: *process
         command: [horizon]
         stop_signal: SIGTERM
-        environment: *application
+        environment:
+            <<: *application
+            IDENTITY_SERVICE_ID: notifications
+            IDENTITY_SERVICE_CAPABILITIES: identity_access.publish
         healthcheck:
             test: [CMD, php, artisan, 'horizon:status']
             interval: 5s

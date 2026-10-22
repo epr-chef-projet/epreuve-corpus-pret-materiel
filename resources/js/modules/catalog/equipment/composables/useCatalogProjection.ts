@@ -20,6 +20,7 @@ export function useCatalogProjection<T>(
     identity: () => string,
     read: (signal: AbortSignal) => Promise<T>,
     accepts: (incoming: T, current: T) => boolean = () => true,
+    acceptsInertia: (incoming: T, current: T) => boolean = accepts,
 ) {
     const access = useAccessStore();
     const subscriptions = inject(sessionSubscriptionsKey, null);
@@ -161,7 +162,7 @@ export function useCatalogProjection<T>(
     const stopInitial = watch(initial, (value) => {
         if (current()) {
             const key = identity();
-            if (key !== dataIdentity || accepts(value, data.value)) {
+            if (key !== dataIdentity || acceptsInertia(value, data.value)) {
                 data.value = value;
                 dataIdentity = key;
             }

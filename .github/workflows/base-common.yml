@@ -70,6 +70,35 @@ jobs:
                   docker compose version
                   test "$(docker context show)" = default
 
+            - name: Sélectionner le contrat de la source reçue
+              id: image_contract
+              run: |
+                  python3 - <<'PYCONTRACT'
+                  import hashlib, json, os
+                  from pathlib import Path
+                  source = os.environ['EXPECTED_SOURCE']
+                  path = Path('docker/production/verification-contract.json')
+                  legacy = {
+                      'ee3cebfb4974f5b3a9ef0c79f8e606bf1b5af25b',
+                      '8fee985b42bdcbe1bf052a8c14c40c6df83cfb32',
+                      '5f91de983175e88229024beecfaf28c5a8459581',
+                  }
+                  if path.exists():
+                      content = path.read_bytes()
+                      contract = json.loads(content)
+                      assert type(contract) is dict and type(contract.get('schemaVersion')) is int and contract == {'schemaVersion': 1, 'profile': 'catalog-v1'}, 'Unknown image verification contract'
+                      profile, digest = contract['profile'], hashlib.sha256(content).hexdigest()
+                  else:
+                      assert source in legacy, 'Missing image verification contract for an unknown source'
+                      profile, digest = 'foundation-v1', None
+                  proof = {'sourceSha': source, 'profile': profile, 'contractSha256': digest}
+                  target = Path(os.environ['RUNNER_TEMP']) / 'image-proof'
+                  target.mkdir(parents=True, exist_ok=True)
+                  (target / 'verification-contract.json').write_text(json.dumps(proof, indent=2) + '\n')
+                  with open(os.environ['GITHUB_ENV'], 'a') as output:
+                      output.write('IMAGE_CONTRACT=' + profile + '\n')
+                  PYCONTRACT
+
             - name: Activer le stockage Docker compatible avec les caches BuildKit
               run: |
                   if ! docker info --format '{{json .DriverStatus}}' | python3 -c 'import json, sys; sys.exit(not any("io.containerd.snapshotter.v1" in entry for entry in json.load(sys.stdin)))'; then
@@ -781,7 +810,10 @@ jobs:
                       finally:
                           foreign_stream.close()
                           foreign.close()
-                      private_catalog_notification(accepted, accepted_stream, accepted_socket_id)
+                      if os.environ['IMAGE_CONTRACT'] == 'catalog-v1':
+                          private_catalog_notification(accepted, accepted_stream, accepted_socket_id)
+                      else:
+                          assert os.environ['IMAGE_CONTRACT'] == 'foundation-v1', 'Unknown image verification profile'
                       (root / 'reverb-ready').touch()
                       stop_deadline = time.monotonic() + 240
                       while time.monotonic() < stop_deadline:
@@ -959,6 +991,7 @@ jobs:
                   CAPACITY_RESULT: ${{ steps.capacity.outcome }}
                   IMAGE_UPLOAD_RESULT: ${{ steps.image_upload.outcome }}
                   STORE_ARCHIVE: ${{ inputs.store_archive }}
+                  IMAGE_CONTRACT_RESULT: ${{ steps.image_contract.outcome }}
               run: |
                   export EPR_IMAGE_PROOF=/image-proof
                   export RECEIPT_SHA="$(git rev-parse HEAD)"
@@ -972,7 +1005,7 @@ jobs:
                   export RECEIPT_SOURCE="$(docker image inspect --format '{{ index .Config.Labels "org.epr.runtime-source" }}' "$runtime")"
                   SAIL_SKIP_CHECKS=1 ./vendor/bin/sail --profile tools run --rm --no-deps -T --user "$(id -u):$(id -g)" --entrypoint php --volume "$RUNNER_TEMP/image-proof:/image-proof:ro" \
                     -e EPR_IMAGE_PROOF -e RECEIPT_SHA -e RECEIPT_ROOT -e RECEIPT_UNCHANGED -e RECEIPT_RUNTIME -e RECEIPT_SOURCE \
-                    -e EXPECTED_SOURCE -e IMAGE_RESULT -e SCAN_RESULT -e MEDIA_TESTS_RESULT -e IMAGE_CHECK_RESULT -e ARCHIVE_RESULT -e IMAGE_STOP_RESULT -e CAPACITY_RESULT -e IMAGE_UPLOAD_RESULT -e STORE_ARCHIVE \
+                    -e EXPECTED_SOURCE -e IMAGE_CONTRACT -e IMAGE_CONTRACT_RESULT -e IMAGE_RESULT -e SCAN_RESULT -e MEDIA_TESTS_RESULT -e IMAGE_CHECK_RESULT -e ARCHIVE_RESULT -e IMAGE_STOP_RESULT -e CAPACITY_RESULT -e IMAGE_UPLOAD_RESULT -e STORE_ARCHIVE \
                     -e GITHUB_REPOSITORY -e GITHUB_WORKFLOW_REF -e GITHUB_WORKFLOW_SHA -e GITHUB_SHA -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e EPR_RUN \
                     -e IMAGES_RESULT -e BOOTSTRAP_RESULT -e START_RESULT -e CHECK_RESULT -e TESTS_RESULT -e STOP_RESULT laravel.test <<'PHP'
                   <?php
@@ -985,7 +1018,7 @@ jobs:
                   }
                   $prepared = is_file('.epr-local/runtime') ? parse_ini_file('.epr-local/runtime') : [];
                   $stages = [];
-                  foreach (['IMAGES', 'BOOTSTRAP', 'START', 'CHECK', 'TESTS', 'IMAGE', 'SCAN', 'MEDIA_TESTS', 'IMAGE_CHECK', 'ARCHIVE', 'IMAGE_STOP', 'STOP'] as $name) { $stages[$name] = getenv($name.'_RESULT'); }
+                  foreach (['IMAGE_CONTRACT', 'IMAGES', 'BOOTSTRAP', 'START', 'CHECK', 'TESTS', 'IMAGE', 'SCAN', 'MEDIA_TESTS', 'IMAGE_CHECK', 'ARCHIVE', 'IMAGE_STOP', 'STOP'] as $name) { $stages[$name] = getenv($name.'_RESULT'); }
                   if (getenv('STORE_ARCHIVE') === 'true') { foreach (['CAPACITY', 'IMAGE_UPLOAD'] as $name) { $stages[$name] = getenv($name.'_RESULT'); } }
                   $mediaPath = getenv('EPR_IMAGE_PROOF').'/media-tests.json';
                   $pdfPath = getenv('EPR_IMAGE_PROOF').'/pdf-native.json';
@@ -1003,12 +1036,29 @@ jobs:
                       && ($media['files'] ?? null) === ['tests/Feature/Foundation/ImageEngineTest.php', 'tests/Feature/Foundation/PdfEngineTest.php']
                       && ($pdf['productionDependenciesOnly'] ?? false) && ($pdf['embeddedTrueType'] ?? false) && ($pdf['scriptsDisabled'] ?? false);
                   $notificationPath = getenv('EPR_IMAGE_PROOF').'/catalog-notifications.json';
+                  $contractPath = getenv('EPR_IMAGE_PROOF').'/verification-contract.json';
+                  $contract = is_file($contractPath) ? json_decode(file_get_contents($contractPath), true, 512, JSON_THROW_ON_ERROR) : [];
+                  $profile = getenv('IMAGE_CONTRACT');
+                  $contractValid = ($contract['sourceSha'] ?? null) === getenv('EXPECTED_SOURCE') && ($contract['profile'] ?? null) === $profile
+                      && match ($profile) {
+                          'catalog-v1' => is_file('docker/production/verification-contract.json')
+                              && ($contract['contractSha256'] ?? null) === hash_file('sha256', 'docker/production/verification-contract.json')
+                              && json_decode(file_get_contents('docker/production/verification-contract.json'), true, 512, JSON_THROW_ON_ERROR) === ['schemaVersion' => 1, 'profile' => 'catalog-v1'],
+                          'foundation-v1' => !file_exists('docker/production/verification-contract.json') && ($contract['contractSha256'] ?? null) === null
+                              && in_array(getenv('EXPECTED_SOURCE'), ['ee3cebfb4974f5b3a9ef0c79f8e606bf1b5af25b', '8fee985b42bdcbe1bf052a8c14c40c6df83cfb32', '5f91de983175e88229024beecfaf28c5a8459581'], true),
+                          default => false,
+                      };
                   $notification = is_file($notificationPath) ? json_decode(file_get_contents($notificationPath), true, 512, JSON_THROW_ON_ERROR) : [];
                   $notificationValid = is_string($imageId) && ($notification['imageId'] ?? null) === $imageId
                       && ($notification['sourceSha'] ?? null) === getenv('EXPECTED_SOURCE') && ($notification['nativeExit'] ?? null) === 0
                       && ($notification['workerService'] ?? null) === 'image-horizon' && ($notification['workerImageId'] ?? null) === $imageId && ($notification['privateChannel'] ?? false) === true
                       && ($notification['notificationReceived'] ?? false) === true && ($notification['type'] ?? null) === 'catalog.invalidated'
                       && ($notification['projection'] ?? null) === 'catalogManagement';
+                  $notificationSatisfied = $contractValid && match ($profile) {
+                      'catalog-v1' => $notificationValid,
+                      'foundation-v1' => !is_file($notificationPath),
+                      default => false,
+                  };
                   $valid = getenv('RECEIPT_SHA') === getenv('EXPECTED_SOURCE') && getenv('RECEIPT_UNCHANGED') === 'true'
                       && count(array_filter($stages, fn ($result) => $result !== 'success')) === 0
                       && ($prepared['root'] ?? null) === getenv('RECEIPT_ROOT')
@@ -1016,14 +1066,17 @@ jobs:
                       && ($prepared['image'] ?? null) === getenv('RECEIPT_RUNTIME')
                       && ($prepared['source'] ?? null) === getenv('RECEIPT_SOURCE')
                       && is_file('.epr-local/image-checked') && is_file('.epr-local/image-stopped') && is_file('.epr-local/stopped')
-                      && $mediaValid && $identityValid && $notificationValid
+                      && $mediaValid && $identityValid && $notificationSatisfied
                       && array_column($checks, 'control') === $expected
                       && count(array_filter($checks, fn ($row) => $row['nativeExit'] !== 0)) === 0;
                   $receipt = ['repository' => getenv('GITHUB_REPOSITORY'), 'workflowRef' => getenv('GITHUB_WORKFLOW_REF'),
                       'workflowSha' => getenv('GITHUB_WORKFLOW_SHA'), 'sha' => getenv('RECEIPT_SHA'), 'expectedSha' => getenv('EXPECTED_SOURCE'),
                       'run' => getenv('GITHUB_RUN_ID'), 'attempt' => getenv('GITHUB_RUN_ATTEMPT'), 'profile' => 'local',
                       'project' => $prepared['project'] ?? null, 'stages' => $stages, 'required' => $expected, 'checks' => $checks,
-                      'validated' => $valid, 'imageId' => $imageId, 'configDigest' => $identity['configDigest'] ?? null, 'mediaValidated' => $mediaValid, 'notificationValidated' => $notificationValid, 'runtimeId' => getenv('RECEIPT_RUNTIME'), 'runtimeSource' => getenv('RECEIPT_SOURCE'),
+                      'validated' => $valid, 'imageId' => $imageId, 'configDigest' => $identity['configDigest'] ?? null, 'mediaValidated' => $mediaValid,
+                      'imageContract' => $contract, 'catalogNotificationRequired' => $profile === 'catalog-v1',
+                      'notificationValidated' => $profile === 'catalog-v1' ? $notificationValid : null,
+                      'runtimeId' => getenv('RECEIPT_RUNTIME'), 'runtimeSource' => getenv('RECEIPT_SOURCE'),
                       'locks' => array_combine(['composer.lock', 'package-lock.json'], array_map('hash_file', ['sha256', 'sha256'], ['composer.lock', 'package-lock.json']))];
                   file_put_contents('.epr-local/base-receipt.json', json_encode($receipt, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n");
                   file_put_contents('.epr-local/receipt-output', 'validated='.($valid ? 'true' : 'false')."\nsha=".$receipt['sha']."\nrun=".$receipt['run']."\nattempt=".$receipt['attempt']."\n");

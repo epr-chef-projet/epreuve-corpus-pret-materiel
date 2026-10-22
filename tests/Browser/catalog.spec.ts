@@ -1361,6 +1361,120 @@ test('the visible screen recovers within twenty seconds when its last real notif
     }
 });
 
+test('a delayed computed Inertia list cannot restore equipment removed from its filter', async ({
+    page,
+    browser,
+}) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const name = 'A04 removed filter ' + randomUUID();
+    const url = await create(page, name);
+    await expectSaveConfirmation(page);
+    await page
+        .getByRole('link', { name: 'Retour à la liste', exact: true })
+        .click();
+    await page.getByLabel('Fragment du nom', { exact: true }).fill(name);
+    await page.getByRole('button', { name: 'Rechercher', exact: true }).click();
+    await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
+    await expect(page.locator('ul[aria-busy]')).toHaveAttribute(
+        'aria-busy',
+        'false',
+    );
+    const otherContext = await browser.newContext();
+    const other = await otherContext.newPage();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let computed = () => {};
+    const calculated = new Promise<void>((resolve) => {
+        computed = resolve;
+    });
+    const listPattern = '**/gestion/materiels?*';
+    await page.route(listPattern, async (route) => {
+        if (!route.request().headers()['x-inertia']) return route.continue();
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        const result: unknown = await response.json();
+        expect(result).toMatchObject({
+            props: { catalogPage: { items: [{ name }] } },
+        });
+        computed();
+        await held;
+        await route.fulfill({ response });
+    });
+    try {
+        await signIn(other);
+        await other.goto(url);
+        await page
+            .getByRole('button', { name: 'Rechercher', exact: true })
+            .click();
+        await calculated;
+        await other
+            .getByLabel('Nom *', { exact: true })
+            .fill('Outside filter ' + randomUUID());
+        await other
+            .getByRole('button', {
+                name: 'Enregistrer les textes',
+                exact: true,
+            })
+            .click();
+        await expectSaveConfirmation(other);
+        await expect(
+            page
+                .getByRole('status')
+                .filter({ hasText: 'Aucun matériel ne correspond' }),
+        ).toBeVisible({ timeout: 20_000 });
+        await expect(page.locator('ul[aria-busy]')).toHaveAttribute(
+            'aria-busy',
+            'false',
+        );
+        await page.evaluate((removedName) => {
+            window.catalogRegressions = [];
+            const observer = new MutationObserver(() => {
+                if (
+                    Array.from(
+                        document.querySelectorAll('ul[aria-busy] a'),
+                    ).some(
+                        (element) =>
+                            element.textContent?.trim() === removedName,
+                    )
+                )
+                    window.catalogRegressions?.push(removedName);
+            });
+            observer.observe(document.body, {
+                subtree: true,
+                childList: true,
+                characterData: true,
+            });
+        }, name);
+        const delivered = page.waitForResponse(
+            (response) =>
+                new URL(response.url()).pathname === '/gestion/materiels' &&
+                response.request().headers()['x-inertia'] === 'true',
+        );
+        release();
+        await delivered;
+        await expect(
+            page.getByRole('button', { name: 'Rechercher', exact: true }),
+        ).toBeEnabled();
+        await expect(page.locator('ul[aria-busy]')).toHaveAttribute(
+            'aria-busy',
+            'false',
+        );
+        expect(await page.evaluate(() => window.catalogRegressions)).toEqual(
+            [],
+        );
+        await expect(page.getByRole('link', { name, exact: true })).toHaveCount(
+            0,
+        );
+    } finally {
+        release();
+        await page.unroute(listPattern);
+        await otherContext.close();
+    }
+});
+
 test('pagination retains both filters and a new search returns to the first page', async ({
     page,
 }) => {

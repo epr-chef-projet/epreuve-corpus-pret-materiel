@@ -64,6 +64,8 @@ const projection = useCatalogProjection(
             );
             return !known || item.equipmentVersion >= known.equipmentVersion;
         }),
+    // Row versions cannot order collection membership, including an empty page.
+    () => false,
 );
 const rows = computed(() => projection.data.value.items);
 function visit(

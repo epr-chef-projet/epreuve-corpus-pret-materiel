@@ -294,3 +294,54 @@ it('keeps a newer equipment version when an older Inertia page and read arrive l
     await vi.advanceTimersByTimeAsync(0);
     expect(projection.data.value.equipmentVersion).toBe(4);
 });
+
+it('keeps a recovered empty collection when an old Inertia collection arrives and accepts new search and page identities', async () => {
+    const first = { items: [{ id: 'equipment-a', version: 1 }] };
+    const initial = ref(first);
+    const identity = ref('filter-a/page-1');
+    const replies: ((value: typeof first) => void)[] = [];
+    let projection!: ReturnType<typeof useCatalogProjection<typeof first>>;
+    wrapper = mount(
+        defineComponent({
+            setup() {
+                projection = useCatalogProjection(
+                    initial,
+                    () => identity.value,
+                    () => new Promise((resolve) => replies.push(resolve)),
+                    (incoming, current) =>
+                        incoming.items.every((item) => {
+                            const known = current.items.find(
+                                (row) => row.id === item.id,
+                            );
+                            return !known || item.version >= known.version;
+                        }),
+                    () => false,
+                );
+                return () => null;
+            },
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    replies[0]({ items: [] });
+    await vi.advanceTimersByTimeAsync(0);
+
+    initial.value = { items: [...first.items] };
+    await vi.advanceTimersByTimeAsync(0);
+    expect(projection.data.value.items).toEqual([]);
+    replies[1]({ items: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(projection.data.value.items).toEqual([]);
+
+    identity.value = 'filter-b/page-1';
+    initial.value = first;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(projection.data.value.items).toEqual(first.items);
+    replies[2](first);
+    await vi.advanceTimersByTimeAsync(0);
+    identity.value = 'filter-b/page-2';
+    initial.value = { items: [{ id: 'equipment-b', version: 1 }] };
+    await vi.advanceTimersByTimeAsync(0);
+    expect(projection.data.value.items).toEqual([
+        { id: 'equipment-b', version: 1 },
+    ]);
+});

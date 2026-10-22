@@ -5,13 +5,14 @@ FROM cgr.dev/chainguard/php@sha256:c6714e4394e5fddbf700596f1100e24a9fd8b66239817
 FROM cgr.dev/chainguard/wolfi-base@sha256:030e45cb37187dff322bbefe9658bcaec31b824a5d523380771a64864c9f45d4 AS apk-assembly
 USER root
 COPY --from=base / /base-root
-RUN apk add --no-cache --no-scripts --root /base-root \
-      php-8.5=8.5.11-r2 php-8.5-fpm=8.5.11-r2 \
-      php-8.5-bcmath=8.5.11-r2 php-8.5-exif=8.5.11-r2 php-8.5-fileinfo=8.5.11-r2 \
-      php-8.5-intl=8.5.11-r2 php-8.5-mbstring=8.5.11-r2 php-8.5-pcntl=8.5.11-r2 \
-      php-8.5-pdo_pgsql=8.5.11-r2 php-8.5-posix=8.5.11-r2 php-8.5-zip=8.5.11-r2 \
-      php-8.5-dom=8.5.11-r2 php-8.5-xml=8.5.11-r2 php-8.5-xmlwriter=8.5.11-r2 \
-      php-8.5-simplexml=8.5.11-r2 php-8.5-redis=6.3.0-r6 php-8.5-imagick=3.8.1-r8 \
+RUN php_upgrades="$(awk -F: '$1 == "P" && $2 ~ /^php-8[.]5($|-)/ && $2 !~ /^php-8[.]5-(redis|imagick|igbinary)($|-)/ { print $2 "=8.5.12-r0" }' /base-root/lib/apk/db/installed)" \
+    && apk add --no-cache --no-scripts --root /base-root $php_upgrades \
+      php-8.5=8.5.12-r0 php-8.5-fpm=8.5.12-r0 \
+      php-8.5-bcmath=8.5.12-r0 php-8.5-exif=8.5.12-r0 php-8.5-fileinfo=8.5.12-r0 \
+      php-8.5-intl=8.5.12-r0 php-8.5-mbstring=8.5.12-r0 php-8.5-pcntl=8.5.12-r0 \
+      php-8.5-pdo_pgsql=8.5.12-r0 php-8.5-posix=8.5.12-r0 php-8.5-zip=8.5.12-r0 \
+      php-8.5-dom=8.5.12-r0 php-8.5-xml=8.5.12-r0 php-8.5-xmlwriter=8.5.12-r0 \
+      php-8.5-simplexml=8.5.12-r0 php-8.5-redis=6.3.0-r6 php-8.5-imagick=3.8.1-r8 \
       imagemagick-7=7.1.2.33-r0 ttf-dejavu=2.37-r9 \
       nginx-mainline=1.31.6-r3 nginx-mainline-config=1.31.6-r3 \
       nginx-mainline-fastcgi-params=1.31.6-r3 nginx-mainline-mime-types=1.31.6-r3 \
@@ -21,7 +22,7 @@ RUN apk add --no-cache --no-scripts --root /base-root \
     && ldconfig -r /base-root \
     && chroot /base-root /usr/bin/busybox --install -s /usr/bin
 
-# Preserve the upgraded filesystem without restoring files removed by APK.
+# Copy the assembled root once so removed package files stay removed.
 FROM scratch AS runtime
 USER root
 COPY --from=apk-assembly /base-root /
@@ -33,7 +34,9 @@ COPY docker/production/nginx.conf /etc/nginx/nginx.conf
 COPY docker/imagick/policy.xml /etc/epr-imagick/policy.xml
 RUN sed '/^<!DOCTYPE policymap>$/d' /etc/epr-imagick/policy.xml > /etc/ImageMagick-7/policy.xml \
     && cp /etc/ImageMagick-7/policy.xml /etc/epr-imagick/policy.xml
-ENV MAGICK_CONFIGURE_PATH=/etc/epr-imagick \
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    MAGICK_CONFIGURE_PATH=/etc/epr-imagick \
     APP_ENV=production APP_DEBUG=false LOG_CHANNEL=stderr LOG_LEVEL=info
 WORKDIR /var/www/html
 

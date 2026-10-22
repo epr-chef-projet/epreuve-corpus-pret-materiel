@@ -35,6 +35,7 @@ beforeEach(() => {
 afterEach(() => {
     dispose();
     http.setClient(originalClient);
+    vi.useRealTimers();
 });
 
 function setup() {
@@ -139,5 +140,63 @@ describe('HTTP generation boundary', () => {
         await observed;
         expect(fixture.access.status).toBe('offline');
         expect(fixture.access.context).toEqual(guest);
+    });
+    it('recovers when the first context read after an online signal still fails without replaying writes', async () => {
+        vi.useFakeTimers();
+        const response = {
+            data: JSON.stringify(guest),
+            status: 200,
+            headers: {},
+        };
+        const request = vi
+            .fn()
+            .mockResolvedValueOnce(response)
+            .mockRejectedValueOnce(new HttpNetworkError('Not reachable yet'))
+            .mockResolvedValue(response);
+        http.setClient({ request });
+        const presentation = createPresentation(commonMessages);
+        const lifecycle = installAccessLifecycle(presentation);
+        dispose = () => {
+            lifecycle.dispose();
+            presentation.dispose();
+        };
+        const access = useAccessStore();
+        await flushPromises();
+        window.dispatchEvent(new Event('offline'));
+        window.dispatchEvent(new Event('online'));
+        await flushPromises();
+        expect(access.status).toBe('offline');
+        await vi.advanceTimersByTimeAsync(1_200);
+        expect(access.status).toBe('guest');
+        expect(access.confirming).toBe(false);
+        expect(access.stale).toBe(false);
+        expect(request).toHaveBeenCalledTimes(3);
+        for (const [config] of request.mock.calls) {
+            expect(config).toMatchObject({
+                method: 'get',
+                url: '/access/context',
+            });
+        }
+    });
+    it('spaces failed recovery reads and stops them when their owner is disposed', async () => {
+        vi.useFakeTimers();
+        const request = vi
+            .fn()
+            .mockRejectedValue(new HttpNetworkError('Unavailable'));
+        http.setClient({ request });
+        const presentation = createPresentation(commonMessages);
+        const lifecycle = installAccessLifecycle(presentation);
+        dispose = () => {
+            lifecycle.dispose();
+            presentation.dispose();
+        };
+        await flushPromises();
+        await vi.advanceTimersByTimeAsync(3_500);
+        expect(useAccessStore().status).toBe('offline');
+        expect(request).toHaveBeenCalledTimes(3);
+        dispose();
+        dispose = () => {};
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(request).toHaveBeenCalledTimes(3);
     });
 });

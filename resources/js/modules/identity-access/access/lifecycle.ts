@@ -18,6 +18,7 @@ export function installAccessLifecycle(presentation: Presentation) {
     let interval: ReturnType<typeof setTimeout> | undefined;
     let freshness: ReturnType<typeof setTimeout> | undefined;
     let locked = false;
+    let recoveryAttempt = 0;
 
     http.setClient({
         async request(config) {
@@ -83,6 +84,7 @@ export function installAccessLifecycle(presentation: Presentation) {
     }
     function invalidate(signingOut = false) {
         sequence++;
+        recoveryAttempt = 0;
         pending?.abort();
         pending = null;
         clearTimeout(freshness);
@@ -90,15 +92,16 @@ export function installAccessLifecycle(presentation: Presentation) {
         document.cookie = 'sidebar_state=;path=/;max-age=0;SameSite=Lax';
         scrubPage();
     }
-    function schedule() {
+    function schedule(recovering = false) {
         clearTimeout(interval);
         if (!disposed && document.visibilityState !== 'hidden') {
-            interval = setTimeout(
-                () => {
-                    void verify();
-                },
-                13_000 + Math.random() * 2_000,
-            );
+            const delay = recovering
+                ? ([1000, 2000, 5000][recoveryAttempt++] ?? 15_000) *
+                  (0.9 + Math.random() * 0.2)
+                : 13_000 + Math.random() * 2_000;
+            interval = setTimeout(() => {
+                void verify();
+            }, delay);
         }
     }
     async function verify(force = false) {
@@ -108,6 +111,7 @@ export function installAccessLifecycle(presentation: Presentation) {
         const generation = access.generation;
         const abort = new AbortController();
         pending = abort;
+        let recovering = false;
         const timeout = setTimeout(() => abort.abort(), 10_000);
         try {
             const data = await readContext(abort.signal);
@@ -127,6 +131,7 @@ export function installAccessLifecycle(presentation: Presentation) {
             }
             locked = false;
             access.accept(data);
+            recoveryAttempt = 0;
             document.documentElement.style.visibility = '';
             clearTimeout(freshness);
             freshness = setTimeout(access.markStale, 20_000);
@@ -136,13 +141,15 @@ export function installAccessLifecycle(presentation: Presentation) {
                     router.visit(window.location.href, { replace: true });
             }
         } catch {
-            if (current === sequence && generation === access.generation)
+            if (current === sequence && generation === access.generation) {
                 access.offline();
+                recovering = true;
+            }
         } finally {
             clearTimeout(timeout);
             if (current === sequence || pending === abort) {
                 pending = null;
-                schedule();
+                schedule(recovering);
             }
         }
     }

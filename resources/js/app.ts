@@ -1,4 +1,23 @@
 import { createInertiaApp } from '@inertiajs/vue3';
+import {
+    catalogMessages,
+    installCatalogOperationCleanup,
+} from '@/modules/catalog/public/equipment';
+import { commonMessages } from '@/shared/i18n/messages';
+import {
+    createPresentation,
+    presentationKey,
+} from '@/shared/i18n/presentation';
+import {
+    accessLifecycleKey,
+    identityMessages,
+    installAccessLifecycle,
+    installSessionTransport,
+    sessionSubscriptionsKey,
+    useAccessStore,
+} from '@/modules/identity-access/public/access';
+import { watch } from 'vue';
+import { toast } from 'vue-sonner';
 import { createPinia } from 'pinia';
 import { initializeTheme } from '@/composables/useAppearance';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -8,12 +27,42 @@ import { focus } from '@/shared/directives/focus';
 import { createEcho, echoKey } from '@/shared/realtime';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const presentation = createPresentation({
+    fr: {
+        ...commonMessages.fr,
+        ...identityMessages.fr,
+        ...catalogMessages.fr,
+        issues: {
+            ...commonMessages.fr.issues,
+            ...identityMessages.fr.issues,
+            ...catalogMessages.fr.issues,
+            operations: {
+                ...commonMessages.fr.issues.operations,
+                ...catalogMessages.fr.issues.operations,
+            },
+        },
+    },
+    en: {
+        ...commonMessages.en,
+        ...identityMessages.en,
+        ...catalogMessages.en,
+        issues: {
+            ...commonMessages.en.issues,
+            ...identityMessages.en.issues,
+            ...catalogMessages.en.issues,
+            operations: {
+                ...commonMessages.en.issues.operations,
+                ...catalogMessages.en.issues.operations,
+            },
+        },
+    },
+});
 
 void createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),
     layout: (name) => {
         switch (true) {
-            case name === 'Welcome':
+            case name === 'Welcome' || name === 'Error':
                 return null;
             case name.startsWith('auth/'):
                 return AuthLayout;
@@ -23,13 +72,35 @@ void createInertiaApp({
     },
     withApp: (app, { page }) => {
         app.use(createPinia());
-        const echo = createEcho(page.props.reverb);
+        app.use(presentation.i18n);
+        app.provide(presentationKey, presentation);
+        const lifecycle = installAccessLifecycle(presentation);
+        app.provide(accessLifecycleKey, lifecycle);
+        const echo = createEcho(page.props.reverb ?? null);
         app.provide(echoKey, echo);
+        const access = useAccessStore();
+        const stopOperationCleanup = installCatalogOperationCleanup();
+        const transport = echo ? installSessionTransport(echo, access) : null;
+        app.provide(sessionSubscriptionsKey, transport?.subscriptions ?? null);
+        const cleanToasts = watch(
+            () => access.generation,
+            () => toast.dismiss(),
+            { flush: 'sync' },
+        );
+        const disposeFlashToast = initializeFlashToast(
+            () => access.status === 'active' && !access.confirming,
+        );
         const disconnect = () => echo?.disconnect();
         window.addEventListener('pagehide', disconnect, { once: true });
         import.meta.hot?.dispose(() => {
             window.removeEventListener('pagehide', disconnect);
             disconnect();
+            transport?.dispose();
+            cleanToasts();
+            stopOperationCleanup();
+            disposeFlashToast();
+            lifecycle.dispose();
+            presentation.dispose();
         });
         app.directive('focus', focus);
     },
@@ -39,8 +110,5 @@ void createInertiaApp({
 });
 
 // This will set light / dark mode on page load...
-initializeTheme();
-
-// This will listen for flash toast data from the server...
-const disposeFlashToast = initializeFlashToast();
-import.meta.hot?.dispose(disposeFlashToast);
+const disposeTheme = initializeTheme();
+import.meta.hot?.dispose(disposeTheme);

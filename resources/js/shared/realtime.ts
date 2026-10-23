@@ -1,6 +1,7 @@
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 import type { InjectionKey } from 'vue';
+import { auth } from '@/routes/broadcasting';
 
 export interface ReverbPublicConfig {
     key: string;
@@ -34,8 +35,17 @@ export function createEcho(
         enabledTransports: ['ws', 'wss'],
         disableStats: true,
         channelAuthorization: {
-            endpoint: '/broadcasting/auth',
+            endpoint: auth.url(),
             transport: 'ajax',
+            headersProvider: () => {
+                const token = document.cookie
+                    .split('; ')
+                    .find((item) => item.startsWith('XSRF-TOKEN='))
+                    ?.slice('XSRF-TOKEN='.length);
+                return token
+                    ? { 'X-XSRF-TOKEN': decodeURIComponent(token) }
+                    : {};
+            },
         },
     });
     return new Echo<'reverb'>({ broadcaster: 'reverb', client });

@@ -62,4 +62,10 @@ describe('typed Inertia flash boundary', () => {
         flash({ type: 'success', message: 'Late fixture' });
         expect(toast.success).not.toHaveBeenCalled();
     });
+    it('suppresses a private message while its access context is unverified', () => {
+        dispose();
+        dispose = initializeFlashToast(() => false);
+        flash({ type: 'success', message: 'Previous private result' });
+        expect(toast.success).not.toHaveBeenCalled();
+    });
 });

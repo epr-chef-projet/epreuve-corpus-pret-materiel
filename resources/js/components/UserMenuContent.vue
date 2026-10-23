@@ -1,45 +1,34 @@
 <script setup lang="ts">
-import { Link, router } from '@inertiajs/vue3';
 import { LogOut } from '@lucide/vue';
+import { inject } from 'vue';
+import { useI18n } from 'vue-i18n';
 import {
     DropdownMenuItem,
     DropdownMenuLabel,
     DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import UserInfo from '@/components/UserInfo.vue';
-import { logout } from '@/routes';
+import { accessLifecycleKey } from '@/modules/identity-access/public/access';
 import type { User } from '@/types';
-
-type Props = {
-    user: User;
-};
-
-const handleLogout = () => {
-    router.flushAll();
-    router.clearHistory();
-};
-
-defineProps<Props>();
+defineProps<{ user: User }>();
+const lifecycle = inject(accessLifecycleKey);
+const { t } = useI18n();
 </script>
 
 <template>
-    <DropdownMenuLabel class="p-0 font-normal">
-        <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-            <UserInfo :user="user" :show-login="true" />
-        </div>
-    </DropdownMenuLabel>
+    <DropdownMenuLabel class="p-0 font-normal"
+        ><div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+            <UserInfo :user="user" :show-login="true" /></div
+    ></DropdownMenuLabel>
     <DropdownMenuSeparator />
-    <DropdownMenuSeparator />
-    <DropdownMenuItem :as-child="true">
-        <Link
+    <DropdownMenuItem as-child
+        ><button
             class="block w-full cursor-pointer"
-            :href="logout()"
-            as="button"
+            type="button"
             data-test="logout-button"
-            @click="handleLogout"
+            @click="lifecycle?.signOut()"
         >
-            <LogOut class="mr-2 h-4 w-4" />
-            Log out
-        </Link>
-    </DropdownMenuItem>
+            <LogOut class="mr-2 h-4 w-4" />{{ t('identity.signOut') }}
+        </button></DropdownMenuItem
+    >
 </template>

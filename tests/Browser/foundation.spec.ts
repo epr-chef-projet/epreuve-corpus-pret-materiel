@@ -25,7 +25,7 @@ async function signIn(page: Page, login: string) {
     await page
         .getByRole('button', { name: 'Se connecter', exact: true })
         .click();
-    await expect(page).toHaveURL(/\/dashboard(?:\?|$)/);
+    await expect(page).toHaveURL(/\/(catalogue|demandes)(?:\?|$)/);
 }
 
 async function watchPreviousIdentity(page: Page) {
@@ -64,9 +64,9 @@ async function verifyPrivateHistory(page: Page) {
         page.getByText(actor.displayName, { exact: true }),
     ).toHaveCount(0);
     await page.goForward();
-    await expect(
-        page.getByRole('heading', { name: 'Accès à l’atelier' }),
-    ).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Catalogue' })).toHaveCount(
+        0,
+    );
     await page.goto('/login');
     await signIn(page, otherActor.login);
     await expect(
@@ -97,7 +97,7 @@ test('built page and real login protect private history after logout', async ({
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto('/');
-    await page.getByRole('link', { name: 'Log in', exact: true }).click();
+    await page.getByRole('link', { name: 'Se connecter', exact: true }).click();
     await expect(page.getByLabel('Identifiant')).toBeVisible();
     await page.getByLabel('Identifiant').fill(actorLogin);
     await page
@@ -106,7 +106,7 @@ test('built page and real login protect private history after logout', async ({
     await page
         .getByRole('button', { name: 'Se connecter', exact: true })
         .click();
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page).toHaveURL(/\/(catalogue|demandes)$/);
     expect(await page.evaluate(() => isSecureContext && !!crypto.subtle)).toBe(
         true,
     );
@@ -164,7 +164,7 @@ test('private realtime authorizes the actor, receives a server event and leaves'
     await page
         .getByRole('button', { name: 'Se connecter', exact: true })
         .click();
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page).toHaveURL(/\/(catalogue|demandes)$/);
     await page.goto('/__foundation');
     await expect(page.getByTestId('subscribed')).toHaveText('true');
     await page.getByRole('button', { name: 'Publish', exact: true }).click();
@@ -189,7 +189,7 @@ test('QR image does not execute SVG scripts or fetch external resources', async 
     await page
         .getByRole('button', { name: 'Se connecter', exact: true })
         .click();
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page).toHaveURL(/\/(catalogue|demandes)$/);
     await page.goto('/__foundation');
     const qr = page.getByRole('img', {
         name: 'Two-factor authentication QR code',

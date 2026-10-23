@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Fixtures\Foundation;
 
 use App\Modules\IdentityAccess\Identity\Models\User;
+use App\Modules\IdentityAccess\PublicApi\Role;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Vite;
 use Illuminate\Http\JsonResponse;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -29,7 +31,6 @@ final class FoundationServiceProvider extends ServiceProvider
         $this->app->make(Vite::class)->useHotFile(storage_path('hot'))->useBuildDirectory('browser-build');
         view()->addNamespace('test-fixtures', base_path('tests/Fixtures'));
 
-        Broadcast::routes(['middleware' => ['web', 'auth']]);
         Broadcast::channel('foundation.probe.{id}', static fn (User $user, string $id): bool => (string) $user->id === $id);
         Route::middleware(['web', 'auth'])->group(function (): void {
             Route::get('/__foundation', static function (Request $request): Response {
@@ -38,6 +39,7 @@ final class FoundationServiceProvider extends ServiceProvider
 
                 return Inertia::render('_foundation/Probe', ['probeUserId' => $user->id, 'csrfToken' => csrf_token()])->rootView('test-fixtures::foundation');
             });
+            Route::get('/__foundation/session', static fn (): Response => Inertia::render('_foundation/SessionProbe', ['csrfToken' => csrf_token()])->rootView('test-fixtures::foundation'));
             Route::post('/__foundation/publish', static function (Request $request): JsonResponse {
                 $user = $request->user();
                 abort_unless($user instanceof User, 403);
@@ -45,6 +47,14 @@ final class FoundationServiceProvider extends ServiceProvider
 
                 return response()->json(['published' => true]);
             });
+            Route::post('/__foundation/session-publish', static function (Request $request): JsonResponse {
+                $user = $request->user();
+                abort_unless($user instanceof User, 403);
+                $id = (string) Str::uuid7();
+                SessionProbeJob::dispatch($user->workshop_id, $user->id, Role::from($user->role), $id, $request->boolean('barrier'));
+
+                return response()->json(['eventId' => $id], 202);
+            })->name('fixture.sessionPublish');
             Route::post('/__foundation/end-session', static function (Request $request): HttpResponse {
                 $reason = $request->input('reason');
                 abort_unless(in_array($reason, ['expired', 'missing'], true), 422);
@@ -54,6 +64,20 @@ final class FoundationServiceProvider extends ServiceProvider
                     $request->session()->invalidate();
                     $request->session()->regenerateToken();
                 }
+
+                return response()->noContent();
+            });
+        });
+        Route::middleware('web')->prefix('/__foundation/session-probe/{id}')->whereUuid('id')->group(function (): void {
+            Route::get('/', static function (string $id): JsonResponse {
+                $path = 'foundation/session-probe/'.$id;
+                $disk = Storage::disk('local');
+
+                return response()->json(['started' => $disk->exists($path.'.started'), 'result' => $disk->exists($path.'.done') ? json_decode((string) $disk->get($path.'.done'), true, flags: JSON_THROW_ON_ERROR) : null]);
+            });
+            Route::post('/release', static function (string $id): HttpResponse {
+                abort_unless(Storage::disk('local')->exists('foundation/session-probe/'.$id.'.started'), 404);
+                Storage::disk('local')->put('foundation/session-probe/'.$id.'.release', 'release');
 
                 return response()->noContent();
             });

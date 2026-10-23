@@ -40,6 +40,17 @@ export default defineConfig({
             reuseExistingServer: false,
             gracefulShutdown: { signal: 'SIGTERM', timeout: 10_000 },
         },
+        {
+            command: 'php artisan horizon',
+            wait: { stdout: /Horizon started successfully/ },
+            env: {
+                ...browserEnvironment,
+                IDENTITY_SERVICE_ID: 'browser-notifications',
+                IDENTITY_SERVICE_CAPABILITIES: 'identity_access.publish',
+            },
+            reuseExistingServer: false,
+            gracefulShutdown: { signal: 'SIGTERM', timeout: 10_000 },
+        },
     ],
     reporter: [['list']],
 });

@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Infrastructure\Http\Presentation\SetPresentationLocale;
+use App\Infrastructure\Http\Session\ReadOnlySession;
 use App\Modules\IdentityAccess\Access\Http\ResolveSession;
 use App\Modules\IdentityAccess\Access\Http\ShareIdentity;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
@@ -13,6 +14,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -23,13 +25,14 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->prependToPriorityList(StartSession::class, ReadOnlySession::class);
         $middleware->prependToPriorityList(AuthenticatesRequests::class, ResolveSession::class);
-        $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
+        $middleware->append(SetPresentationLocale::class);
+        $middleware->encryptCookies(except: ['sidebar_state']);
 
         $middleware->web(append: [
             ResolveSession::class,
             ShareIdentity::class,
-            HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
@@ -40,7 +43,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 'environment' => app()->environment(),
                 'exceptionClass' => $error::class,
                 'sqlState' => $error->errorInfo[0] ?? null,
-                'correlationId' => (string) Str::uuid7(),
+                'correlationId' => app()->runningInConsole() ? (string) Str::uuid7() : request()->attributes->get('correlationId', (string) Str::uuid7()),
             ];
             try {
                 Log::channel($error->getConnectionName() === 'auth_lookup' ? 'identity' : 'runtime')->error('database.failure', $diagnostic);

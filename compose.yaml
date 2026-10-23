@@ -87,6 +87,8 @@ services:
         command: ['artisan', 'horizon']
         working_dir: /var/www/html
         environment:
+            IDENTITY_SERVICE_ID: notifications
+            IDENTITY_SERVICE_CAPABILITIES: identity_access.publish
             MAGICK_CONFIGURE_PATH: '/var/www/html/docker/imagick'
             MAGICK_MEMORY_LIMIT: 128MiB
             MAGICK_MAP_LIMIT: 128MiB

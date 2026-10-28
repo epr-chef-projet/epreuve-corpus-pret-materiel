@@ -26,20 +26,32 @@ final class OperationRepository
 
     public function acquire(OperationScope $scope, string $inputHash): ?CommandReceipt
     {
-        $this->guard($scope);
         if (preg_match('/\A[0-9a-f]{64}\z/D', $inputHash) !== 1) {
             throw new LogicException('Invalid canonical input fingerprint.');
         }
-        $digest = hash('sha256', json_encode([$scope->workshopId, $scope->actorId, $scope->operationType, $scope->operationKey], JSON_THROW_ON_ERROR));
-        $first = (int) hexdec(substr($digest, 0, 8));
-        $second = (int) hexdec(substr($digest, 8, 8));
-        DB::connection('pgsql')->select('SELECT pg_advisory_xact_lock(?::integer, ?::integer)', [$first > 2147483647 ? $first - 4294967296 : $first, $second > 2147483647 ? $second - 4294967296 : $second]);
+        $this->lock($scope);
         $row = $this->find($scope);
+        if ($row !== null && $row->status === 'closed') {
+            throw new IntentClosed('This creation intention has been permanently closed.');
+        }
         if ($row !== null && ! hash_equals($row->input_sha256, $inputHash)) {
             throw new IntentMismatch('The same operation key describes a different intention.');
         }
 
         return $row === null ? null : $this->receipt($row, true);
+    }
+
+    private function lock(OperationScope $scope): void
+    {
+        $this->guard($scope);
+        $mode = DB::connection('pgsql')->selectOne("SELECT current_setting('transaction_isolation') AS isolation, current_setting('transaction_read_only') AS readonly");
+        if ($mode === null || $mode->isolation !== 'read committed' || $mode->readonly !== 'off') {
+            throw new LogicException('An operation lock requires a writable READ COMMITTED SQL unit.');
+        }
+        $digest = hash('sha256', json_encode([$scope->workshopId, $scope->actorId, $scope->operationType, $scope->operationKey], JSON_THROW_ON_ERROR));
+        $first = (int) hexdec(substr($digest, 0, 8));
+        $second = (int) hexdec(substr($digest, 8, 8));
+        DB::connection('pgsql')->select('SELECT pg_advisory_xact_lock(?::integer, ?::integer)', [$first > 2147483647 ? $first - 4294967296 : $first, $second > 2147483647 ? $second - 4294967296 : $second]);
     }
 
     public function record(OperationScope $scope, string $inputHash, string $resourceId, int $version, string $recordedAt): CommandReceipt
@@ -55,12 +67,32 @@ final class OperationRepository
         return new CommandReceipt($scope->operationKey, $scope->operationType, 'equipment', $resourceId, $version, $recordedAt, false);
     }
 
-    public function read(OperationScope $scope): ?CommandReceipt
+    public function close(OperationScope $scope, string $recordedAt): CommandReceipt|OperationClosureData
+    {
+        if ($scope->operationType !== 'catalog.equipment.create') {
+            throw new LogicException('Only an equipment creation intention can be closed.');
+        }
+        $this->lock($scope);
+        $row = $this->find($scope);
+        if ($row !== null) {
+            return $this->outcome($row);
+        }
+        DB::connection('pgsql')->table('operation_receipts')->insert([
+            'id' => (string) Str::uuid7(), 'workshop_id' => $scope->workshopId, 'actor_id' => $scope->actorId,
+            'operation_type' => $scope->operationType, 'operation_key' => $scope->operationKey, 'status' => 'closed',
+            'input_sha256' => null, 'resource_type' => null, 'resource_id' => null, 'equipment_id' => null,
+            'result_version' => null, 'recorded_at' => $recordedAt,
+        ]);
+
+        return new OperationClosureData($scope->operationKey, $recordedAt);
+    }
+
+    public function read(OperationScope $scope): CommandReceipt|OperationClosureData|null
     {
         $this->guard($scope);
         $row = $this->find($scope);
 
-        return $row === null ? null : $this->receipt($row, true);
+        return $row === null ? null : $this->outcome($row);
     }
 
     private function find(OperationScope $scope): ?stdClass
@@ -68,7 +100,14 @@ final class OperationRepository
         return DB::connection('pgsql')->table('operation_receipts')
             ->where('workshop_id', $scope->workshopId)->where('actor_id', $scope->actorId)
             ->where('operation_type', $scope->operationType)->where('operation_key', $scope->operationKey)
-            ->first(['operation_key', 'operation_type', 'input_sha256', 'resource_type', 'resource_id', 'result_version', 'recorded_at']);
+            ->first(['operation_key', 'operation_type', 'status', 'input_sha256', 'resource_type', 'resource_id', 'result_version', 'recorded_at']);
+    }
+
+    private function outcome(stdClass $row): CommandReceipt|OperationClosureData
+    {
+        return $row->status === 'closed'
+            ? new OperationClosureData($row->operation_key, CarbonImmutable::parse($row->recorded_at)->utc()->format('Y-m-d\TH:i:s.v\Z'))
+            : $this->receipt($row, true);
     }
 
     private function receipt(stdClass $row, bool $replayed): CommandReceipt

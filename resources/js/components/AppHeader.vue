@@ -5,32 +5,32 @@ import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback } from '@/shared/ui/avatar';
+import { Button } from '@/shared/ui/button';
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '@/shared/ui/dropdown-menu';
 import {
     NavigationMenu,
     NavigationMenuItem,
     NavigationMenuList,
     navigationMenuTriggerStyle,
-} from '@/components/ui/navigation-menu';
+} from '@/shared/ui/navigation-menu';
 import {
     Sheet,
     SheetContent,
     SheetHeader,
     SheetTitle,
     SheetTrigger,
-} from '@/components/ui/sheet';
+} from '@/shared/ui/sheet';
 import {
     Tooltip,
     TooltipContent,
     TooltipProvider,
     TooltipTrigger,
-} from '@/components/ui/tooltip';
+} from '@/shared/ui/tooltip';
 import UserMenuContent from '@/components/UserMenuContent.vue';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { getInitials } from '@/composables/useInitials';

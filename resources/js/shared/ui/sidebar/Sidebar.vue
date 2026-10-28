@@ -2,10 +2,10 @@
 import type { SidebarProps } from '.';
 import { useI18n } from 'vue-i18n';
 import { cn } from '@/lib/utils';
-import { Sheet, SheetContent } from '@/components/ui/sheet';
-import SheetDescription from '@/components/ui/sheet/SheetDescription.vue';
-import SheetHeader from '@/components/ui/sheet/SheetHeader.vue';
-import SheetTitle from '@/components/ui/sheet/SheetTitle.vue';
+import { Sheet, SheetContent } from '@/shared/ui/sheet';
+import SheetDescription from '@/shared/ui/sheet/SheetDescription.vue';
+import SheetHeader from '@/shared/ui/sheet/SheetHeader.vue';
+import SheetTitle from '@/shared/ui/sheet/SheetTitle.vue';
 import { SIDEBAR_WIDTH_MOBILE, useSidebar } from './utils';
 
 defineOptions({

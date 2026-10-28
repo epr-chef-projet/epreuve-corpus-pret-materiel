@@ -30,7 +30,16 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
-/.agents
+# Shared skill entry points are versioned; other agent files stay private.
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/audit/
+!/.agents/skills/audit-fix/
+/.agents/skills/audit/*
+/.agents/skills/audit-fix/*
+!/.agents/skills/audit/SKILL.md
+!/.agents/skills/audit-fix/SKILL.md
 /.amp
 /.cursor
 /.factory

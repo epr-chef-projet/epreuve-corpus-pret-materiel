@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { usePage } from '@inertiajs/vue3';
-import { SidebarProvider } from '@/components/ui/sidebar';
+import { SidebarProvider } from '@/shared/ui/sidebar';
 import type { AppVariant } from '@/types';
 
 type Props = {

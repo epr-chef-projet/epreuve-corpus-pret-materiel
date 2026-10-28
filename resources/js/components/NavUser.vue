@@ -6,13 +6,13 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '@/shared/ui/dropdown-menu';
 import {
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
     useSidebar,
-} from '@/components/ui/sidebar';
+} from '@/shared/ui/sidebar';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import UserInfo from '@/components/UserInfo.vue';
 import UserMenuContent from '@/components/UserMenuContent.vue';

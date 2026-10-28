@@ -1,11 +1,20 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { effectScope, type EffectScope } from 'vue';
+import { defineComponent, effectScope, ref, type EffectScope } from 'vue';
+import { mount } from '@vue/test-utils';
+import { createI18n } from 'vue-i18n';
+import { router } from '@inertiajs/vue3';
 import { createPinia, setActivePinia } from 'pinia';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import {
     usePendingOperations,
     installCatalogOperationCleanup,
 } from './usePendingOperations';
+import { useEquipmentForm } from './useEquipmentForm';
+import { catalogMessages } from '../../i18n/messages';
+vi.mock('@inertiajs/vue3', async (importOriginal) => {
+    const original = await importOriginal<typeof import('@inertiajs/vue3')>();
+    return { ...original, usePage: () => ({ props: {} }) };
+});
 let scope: EffectScope;
 beforeEach(async () => {
     const { webcrypto } = await vi.importActual<{ webcrypto: Crypto }>(
@@ -233,4 +242,177 @@ it('ignores a former generation finishing after another account starts an operat
     expect(another.proofs.value).toHaveLength(1);
     another.endSending(key);
     expect(another.unresolved.value).toHaveLength(1);
+});
+
+it('keeps a lost creation blocked until a matching terminal closure is received', async () => {
+    const pending = await setup();
+    const key = crypto.randomUUID();
+    await pending.begin(
+        'catalog.equipment.create',
+        { operationKey: key },
+        null,
+        null,
+    );
+    pending.endSending(key);
+    const closure = {
+        operationKey: key,
+        operationType: 'catalog.equipment.create',
+        closedAt: '2026-10-26T12:00:00.000Z',
+    };
+
+    for (const value of [
+        null,
+        { status: 'notEstablished', receipt: null },
+        { ...closure, operationKey: crypto.randomUUID() },
+        { ...closure, operationType: 'catalog.equipment.archive' },
+        { ...closure, closedAt: 'not an instant' },
+        { ...closure, resourceId: crypto.randomUUID() },
+    ]) {
+        expect(pending.finishClosed(value)).toBe(false);
+        expect(pending.unresolved.value).toHaveLength(1);
+    }
+
+    expect(pending.finishClosed(closure)).toBe(true);
+    pending.endSending(key);
+    expect(pending.proofs.value).toEqual([]);
+    expect(sessionStorage.getItem('epr.pendingCatalogOperations')).toBe('[]');
+});
+
+it('removes only the closed creation while another operation still needs checking', async () => {
+    const pending = await setup();
+    const creation = crypto.randomUUID();
+    const edit = crypto.randomUUID();
+    await pending.begin(
+        'catalog.equipment.create',
+        { operationKey: creation },
+        null,
+        null,
+    );
+    await pending.begin(
+        'catalog.equipment.update_text',
+        { operationKey: edit },
+        crypto.randomUUID(),
+        2,
+    );
+    pending.endSending(creation);
+    pending.endSending(edit);
+
+    pending.finishClosed({
+        operationKey: creation,
+        operationType: 'catalog.equipment.create',
+        closedAt: '2026-10-26T12:00:00.000Z',
+    });
+
+    expect(pending.unresolved.value.map((proof) => proof.operationKey)).toEqual(
+        [edit],
+    );
+    expect(
+        sessionStorage.getItem('epr.pendingCatalogOperations'),
+    ).not.toContain(creation);
+});
+
+it('ignores a former access generation receiving a closure for a newly reused key', async () => {
+    const pending = await setup();
+    const access = useAccessStore();
+    const context = access.context!;
+    const key = crypto.randomUUID();
+    await pending.begin(
+        'catalog.equipment.create',
+        { operationKey: key },
+        null,
+        null,
+    );
+    access.invalidate();
+    access.accept({
+        ...context,
+        authGeneration: 2,
+        broadcastToken: 'b'.repeat(64),
+    });
+    const another = scope.run(() => usePendingOperations())!;
+    await vi.waitFor(() => expect(another.ready.value).toBe(true));
+    await another.begin(
+        'catalog.equipment.create',
+        { operationKey: key },
+        null,
+        null,
+    );
+
+    expect(
+        pending.finishClosed({
+            operationKey: key,
+            operationType: 'catalog.equipment.create',
+            closedAt: '2026-10-26T12:00:00.000Z',
+        }),
+    ).toBe(false);
+
+    expect(another.proofs.value).toHaveLength(1);
+});
+
+it('releases the matching in-memory creation after a closure without changing a later draft', async () => {
+    scope.run(() => installCatalogOperationCleanup());
+    const post = vi.spyOn(router, 'post').mockImplementation(() => {});
+    let form!: ReturnType<typeof useEquipmentForm>;
+    const wrapper = mount(
+        defineComponent({
+            setup() {
+                form = useEquipmentForm(ref(undefined), ref(null));
+                return () => null;
+            },
+        }),
+        {
+            global: {
+                plugins: [
+                    createI18n({
+                        legacy: false,
+                        locale: 'fr',
+                        messages: catalogMessages,
+                    }),
+                ],
+            },
+        },
+    );
+    try {
+        await vi.waitFor(() => expect(form.pending.ready.value).toBe(true));
+        form.form.name = 'Original equipment';
+        form.form.category = 'Original category';
+        await form.submit();
+        const key = form.pending.proofs.value[0].operationKey;
+        form.pending.endSending(key);
+        form.absent(key);
+        form.form.name = 'New equipment draft';
+        form.form.category = 'New category';
+        form.form.description = 'A newer description';
+        form.form.totalQuantity = '4';
+
+        form.closed(crypto.randomUUID());
+        expect(form.waiting.value).toBe(true);
+        expect(form.resumable.value).toBe(true);
+        form.pending.finishClosed({
+            operationKey: key,
+            operationType: 'catalog.equipment.create',
+            closedAt: '2026-10-26T12:00:00.000Z',
+        });
+        form.closed(key);
+
+        expect(form.waiting.value).toBe(false);
+        expect(form.resumable.value).toBe(false);
+        expect(form.pendingForTarget.value).toBe(false);
+        expect(form.form.data()).toMatchObject({
+            name: 'New equipment draft',
+            category: 'New category',
+            description: 'A newer description',
+            totalQuantity: '4',
+        });
+        expect(post).toHaveBeenCalledTimes(1);
+        await form.submit();
+        expect(post).toHaveBeenCalledTimes(2);
+        expect(form.pending.proofs.value[0].operationKey).not.toBe(key);
+        expect(post.mock.calls[1][1]).toMatchObject({
+            name: 'New equipment draft',
+            description: 'A newer description',
+            totalQuantity: '4',
+        });
+    } finally {
+        wrapper.unmount();
+    }
 });

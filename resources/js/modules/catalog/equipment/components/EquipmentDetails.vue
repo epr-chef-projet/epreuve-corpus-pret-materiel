@@ -2,7 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { toRef } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { LoadingButton } from '@/components/ui/button';
+import { LoadingButton } from '@/shared/ui/button';
 import { manageCatalog } from '@/routes';
 import type { EquipmentData } from '@/types/generated/types/App/Modules/Catalog/PublicApi';
 import type { CommandReceipt } from '@/types/generated/types/App/Infrastructure/Operations';

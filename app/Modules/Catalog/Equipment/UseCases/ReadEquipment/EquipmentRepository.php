@@ -13,12 +13,15 @@ use App\Modules\Catalog\PublicApi\EquipmentQuery;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 final class EquipmentRepository
 {
     private const COLUMNS = ['id', 'workshop_id', 'name', 'description', 'category', 'total_quantity', 'is_active', 'version'];
+
+    private const SUMMARY_COLUMNS = ['id', 'workshop_id', 'name', 'category', 'total_quantity', 'is_active', 'version'];
 
     public function __construct(private SqlUnit $units) {}
 
@@ -32,6 +35,24 @@ final class EquipmentRepository
 
     public function page(ActorContext $actor, EquipmentQuery $query, string $observedAt): EquipmentPage
     {
+        $page = $this->paginate($actor, $query, self::COLUMNS);
+
+        return new EquipmentPage(array_values(array_map($this->data(...), $page->items())), $query->page, $query->perPage, $page->hasMorePages(), $observedAt);
+    }
+
+    public function managementPage(ActorContext $actor, EquipmentQuery $query, string $observedAt): ManagementPageData
+    {
+        $page = $this->paginate($actor, $query, self::SUMMARY_COLUMNS);
+
+        return new ManagementPageData(array_values(array_map($this->summary(...), $page->items())), $query->page, $query->perPage, $page->hasMorePages(), $observedAt);
+    }
+
+    /**
+     * @param  list<string>  $columns
+     * @return Paginator<int, Equipment>
+     */
+    private function paginate(ActorContext $actor, EquipmentQuery $query, array $columns): Paginator
+    {
         $sql = $this->query($actor);
         if ($query->audience === CatalogAudience::Catalog) {
             $sql->where('is_active', true);
@@ -43,9 +64,8 @@ final class EquipmentRepository
         if ($query->category !== null) {
             $sql->where('category', $query->category);
         }
-        $page = $sql->orderBy('name')->orderBy('id')->simplePaginate($query->perPage, self::COLUMNS, 'page', $query->page);
 
-        return new EquipmentPage(array_values(array_map($this->data(...), $page->items())), $query->page, $query->perPage, $page->hasMorePages(), $observedAt);
+        return $sql->orderBy('name')->orderBy('id')->simplePaginate($query->perPage, $columns, 'page', $query->page);
     }
 
     /** @param list<string> $ids
@@ -94,5 +114,10 @@ final class EquipmentRepository
     private function data(Equipment $equipment): EquipmentData
     {
         return new EquipmentData($equipment->id, $equipment->name, $equipment->description, $equipment->category, $equipment->total_quantity, $equipment->is_active ? 'active' : 'archived', $equipment->version, null);
+    }
+
+    private function summary(Equipment $equipment): EquipmentSummaryData
+    {
+        return new EquipmentSummaryData($equipment->id, $equipment->name, $equipment->category, $equipment->total_quantity, $equipment->is_active ? 'active' : 'archived', $equipment->version, null);
     }
 }

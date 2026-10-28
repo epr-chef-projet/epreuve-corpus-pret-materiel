@@ -2,7 +2,7 @@
 import type { HTMLAttributes } from 'vue';
 import { PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/shared/ui/button';
 import { useSidebar } from './utils';
 import { useI18n } from 'vue-i18n';
 const { t } = useI18n();

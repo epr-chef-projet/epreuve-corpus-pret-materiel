@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Modules\Catalog\Equipment;
 
+use App\Infrastructure\Operations\ClosedOperationResultData;
+use App\Infrastructure\Operations\CommandReceipt;
+use App\Infrastructure\Operations\OperationClosureData;
+use App\Infrastructure\Operations\OperationResultData;
 use App\Infrastructure\Operations\RetrySqlUnit;
+use App\Modules\Catalog\Equipment\UseCases\CloseEquipmentOperation\CloseEquipmentOperationAction;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInput;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInputFactory;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentTextService;
@@ -16,6 +21,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use LogicException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
 use Tests\Fixtures\IdentityAccess\Accounts;
 use Tests\TestCase;
@@ -127,5 +133,67 @@ final class EquipmentContractTest extends TestCase
             $this->assertSame('55P03', $error->errorInfo[0] ?? null);
         }
         $this->assertSame(1, $attempts);
+    }
+
+    public function test_a_closure_is_a_distinct_immutable_value_and_preserves_the_two_previous_wire_shapes(): void
+    {
+        $key = '019a0000-0000-7000-8000-000000000001';
+        $closure = new OperationClosureData($key, '2026-10-26T12:30:00.123Z');
+        $closed = new ClosedOperationResultData($closure);
+        $receipt = new CommandReceipt($key, 'catalog.equipment.create', 'equipment', $key, 1, '2026-10-26T12:30:00.123Z', false);
+        $serialized = json_decode(json_encode($closed, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertCount(3, $serialized);
+        $this->assertSame('closed', $serialized['status']);
+        $this->assertNull($serialized['receipt']);
+        $this->assertCount(3, $serialized['closure']);
+        $this->assertSame($key, $serialized['closure']['operationKey']);
+        $this->assertSame('catalog.equipment.create', $serialized['closure']['operationType']);
+        $this->assertSame('2026-10-26T12:30:00.123Z', $serialized['closure']['closedAt']);
+        $this->assertSame(['status' => 'notEstablished', 'receipt' => null], json_decode(json_encode(new OperationResultData('notEstablished', null), JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR));
+        $this->assertSame(['status' => 'applied', 'receipt' => json_decode(json_encode($receipt, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR)], json_decode(json_encode(new OperationResultData('applied', $receipt), JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR));
+        expect(function () use ($closure): void {
+            (new \ReflectionProperty($closure, 'operationKey'))->setValue($closure, '019a0000-0000-7000-8000-000000000002');
+        })->toThrow(\Error::class);
+        expect(function () use ($closed): void {
+            (new \ReflectionProperty($closed, 'status'))->setValue($closed, 'applied');
+        })->toThrow(\Error::class);
+    }
+
+    public function test_closure_refuses_an_outer_read_only_snapshot_without_recording_an_outcome(): void
+    {
+        $actor = $this->actor();
+        $key = '019a0000-0000-7000-8000-000000000004';
+
+        app(SqlUnit::class)->forActorRead($actor, function () use ($actor, $key): void {
+            expect(fn () => app(CloseEquipmentOperationAction::class)->handle($actor, $key))->toThrow(LogicException::class);
+            $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $key]);
+        });
+
+        $this->assertSame(0, DB::connection('pgsql')->transactionLevel());
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function incompatibleClosureUnits(): iterable
+    {
+        yield 'writable repeatable read' => ['REPEATABLE READ, READ WRITE'];
+        yield 'read only read committed' => ['READ COMMITTED, READ ONLY'];
+    }
+
+    #[DataProvider('incompatibleClosureUnits')]
+    public function test_closure_also_refuses_each_incompatible_sql_mode_independently(string $mode): void
+    {
+        $actor = $this->actor();
+        $key = '019a0000-0000-7000-8000-000000000005';
+
+        DB::transaction(function () use ($actor, $key, $mode): void {
+            DB::statement('SET TRANSACTION ISOLATION LEVEL '.$mode);
+            app(SqlUnit::class)->forActor($actor, function () use ($actor, $key): void {
+                expect(fn () => app(CloseEquipmentOperationAction::class)->handle($actor, $key))->toThrow(LogicException::class);
+                $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $key]);
+            });
+        });
+
+        $this->assertSame(0, DB::connection('pgsql')->transactionLevel());
     }
 }

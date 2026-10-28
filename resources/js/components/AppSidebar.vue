@@ -14,7 +14,7 @@ import {
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
-} from '@/components/ui/sidebar';
+} from '@/shared/ui/sidebar';
 import { catalogue, ownRequests, teamRequests, manageCatalog } from '@/routes';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import type { NavItem } from '@/types';

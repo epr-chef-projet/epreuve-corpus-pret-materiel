@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, toRef, useTemplateRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Button, LoadingButton } from '@/components/ui/button';
+import { Button, LoadingButton } from '@/shared/ui/button';
 import {
     Dialog,
     DialogClose,
@@ -11,7 +11,7 @@ import {
     DialogHeader,
     DialogTitle,
     DialogTrigger,
-} from '@/components/ui/dialog';
+} from '@/shared/ui/dialog';
 import type { CommandReceipt } from '@/types/generated/types/App/Infrastructure/Operations';
 import type { EquipmentData } from '@/types/generated/types/App/Modules/Catalog/PublicApi';
 import { useEquipmentState } from '../composables/useEquipmentState';

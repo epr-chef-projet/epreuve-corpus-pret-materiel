@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Catalog\Equipment\UseCases\ReadEquipmentOperation;
 
+use App\Infrastructure\Operations\ClosedOperationResultData;
 use App\Infrastructure\Operations\OperationResultData;
 use App\Infrastructure\Operations\OperationScope;
 use App\Infrastructure\Operations\ReadOperationResult;
@@ -20,7 +21,7 @@ final class ReadEquipmentOperationAction
 {
     public function __construct(private SqlUnit $units, private AuthorizeActor $authorize, private ReadOperationResult $operations) {}
 
-    public function handle(ActorContext $actor, string $operationType, string $operationKey): OperationResultData
+    public function handle(ActorContext $actor, string $operationType, string $operationKey): OperationResultData|ClosedOperationResultData
     {
         $this->authorize->handle($actor, 'manage-catalog');
         Gate::forUser(null)->authorize('viewAny', [Equipment::class, $actor, CatalogAudience::Management]);

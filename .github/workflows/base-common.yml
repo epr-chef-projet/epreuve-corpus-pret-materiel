@@ -360,7 +360,8 @@ jobs:
                   foreach ($packages as $name => $version) {
                       if (str_starts_with($name, "php-8.5") && !preg_match("~^php-8[.]5-(redis|imagick|igbinary)(-|$)~", $name) && $version !== "8.5.12-r0") { exit(1); }
                   }
-                  foreach (["nginx-mainline", "nginx-mainline-config", "nginx-mainline-fastcgi-params", "nginx-mainline-mime-types", "nginx-mainline-scgi-params", "nginx-mainline-uwsgi-params"] as $name) { if (($packages[$name] ?? null) !== "1.31.6-r3") { exit(1); } }
+                  foreach (["nginx-mainline", "nginx-mainline-config", "nginx-mainline-fastcgi-params", "nginx-mainline-mime-types", "nginx-mainline-scgi-params", "nginx-mainline-uwsgi-params"] as $name) { if (($packages[$name] ?? null) !== "1.31.8-r1") { exit(1); } }
+                  foreach (["brotli", "brotli-dev", "libbrotlicommon1", "libbrotlidec1", "libbrotlienc1"] as $name) { if (($packages[$name] ?? null) !== "1.2.1-r2") { exit(1); } }
                   echo json_encode(["php" => PHP_VERSION, "extensions" => $extensions, "packages" => $packages], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n";
                   ' > "$RUNNER_TEMP/image-proof/php-inventory.json"
                   docker run --rm --entrypoint php-fpm "$EPR_IMAGE" --version > "$RUNNER_TEMP/image-proof/php-fpm-version.txt"
@@ -453,7 +454,7 @@ jobs:
                                       owners.append({**values, 'path': directory + '/' + line[2:]})
                           print(json.dumps({'component': component, 'matches': matches, 'absent': not matches, 'interpreters': interpreters, 'packageOwners': owners, 'filesystemEntries': len(members)}))
                           if component == 'tiffcrop':
-                              assert matches == ['usr/bin/tiffcrop'] and owners == [{'package': 'tiff', 'version': '4.7.2-r3', 'path': 'usr/bin/tiffcrop'}]
+                              assert matches == ['usr/bin/tiffcrop'] and owners == [{'package': 'tiff', 'version': '4.7.2-r5', 'path': 'usr/bin/tiffcrop'}]
                           else:
                               assert not matches
                               if component in ['libxml-python', 'perl-archive-tar']: assert not interpreters

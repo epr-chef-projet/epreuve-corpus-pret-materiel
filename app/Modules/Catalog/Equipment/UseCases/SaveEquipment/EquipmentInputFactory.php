@@ -88,6 +88,19 @@ final class EquipmentInputFactory
     }
 
     /** @param array<string, mixed> $data
+     * @return array{operationType: string, operationKey: string}
+     */
+    public function closeOperation(array $data): array
+    {
+        if (array_diff(array_keys($data), ['operationType', 'operationKey']) !== []) {
+            throw ValidationException::withMessages(['catalog' => __('catalog.validation.unknown_fields')]);
+        }
+        $valid = Validator::make($data, ['operationType' => ['required', 'in:'.CreateEquipmentAction::OPERATION], 'operationKey' => ['required', 'uuid', self::UUID]])->validate();
+
+        return ['operationType' => $valid['operationType'], 'operationKey' => $valid['operationKey']];
+    }
+
+    /** @param array<string, mixed> $data
      * @param  array<string, list<string>>  $extra
      * @return array<string, mixed>
      */

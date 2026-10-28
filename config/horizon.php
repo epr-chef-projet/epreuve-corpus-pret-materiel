@@ -9,7 +9,7 @@ return [
     'prefix' => env('APP_ENV') === 'testing' ? 'testing_horizon:' : env('EPR_INSTANCE', 'unconfigured').'_horizon:',
     'middleware' => ['web'],
     'waits' => ['redis:files' => 60, 'redis:notifications' => 60, 'redis:maintenance' => 60],
-    'trim' => ['recent' => 60, 'pending' => 60, 'completed' => 60, 'recent_failed' => 1440, 'failed' => 1440, 'monitored' => 60],
+    'trim' => ['recent' => 60, 'pending' => 60, 'completed' => 60, 'recent_failed' => 20160, 'failed' => 20160, 'monitored' => 60],
     'silenced' => [],
     'metrics' => ['trim_snapshots' => ['job' => 24, 'queue' => 24]],
     'fast_termination' => false,

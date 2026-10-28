@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/shared/ui/avatar';
 import { useInitials } from '@/composables/useInitials';
 import type { User } from '@/types';
 

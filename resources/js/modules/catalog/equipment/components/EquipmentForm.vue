@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Button, LoadingButton } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Button, LoadingButton } from '@/shared/ui/button';
+import { Input } from '@/shared/ui/input';
+import { Label } from '@/shared/ui/label';
 import InputError from '@/components/InputError.vue';
 import { explainIssue } from '@/shared/i18n/issue';
 import type { EquipmentData } from '@/types/generated/types/App/Modules/Catalog/PublicApi';
@@ -209,10 +209,18 @@ const explanation = computed(() =>
                 'catalog.equipment.update_text',
             ]"
             :receipt="receipt"
+            :resolve-creation-keys="state.resolvableCreationKeys.value"
             @absent="state.absent"
             @applied="applied"
+            @closed="state.closed"
         />
-        <p v-if="state.pending.unresolved.value.length && !state.waiting.value">
+        <p
+            v-if="
+                state.pending.unresolved.value.length &&
+                !state.waiting.value &&
+                !state.resolvableCreationKeys.value.length
+            "
+        >
             {{ t('catalog.cannotResume') }}
         </p>
     </section>

@@ -8,8 +8,11 @@ use App\Modules\Catalog\Database\Factories\EquipmentFactory;
 use App\Modules\Catalog\Equipment\Models\Equipment;
 use App\Modules\Catalog\Equipment\Policies\EquipmentPolicy;
 use App\Modules\Catalog\Equipment\UseCases\ChangeEquipmentState\ChangeEquipmentStateAction;
+use App\Modules\Catalog\Equipment\UseCases\CloseEquipmentOperation\CloseEquipmentOperationAction;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\EditEquipmentText\EditEquipmentTextAction;
+use App\Modules\Catalog\Equipment\UseCases\InvalidateCatalog\PublishCatalogInvalidation;
+use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\ReadEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipmentOperation\ReadEquipmentOperationAction;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInput;
 use App\Modules\Catalog\PublicApi\CatalogAudience;
@@ -20,6 +23,7 @@ use App\Modules\Catalog\PublicApi\ReadEquipmentPage;
 use App\Modules\Catalog\PublicApi\ReplaceTotalWithinUnit;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
+use ArrayObject;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Events\QueryExecuted;
@@ -27,6 +31,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -74,7 +79,8 @@ final class EquipmentManagementTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f-]{14}7/', $receipt['resourceId']);
         $this->assertDatabaseHas('catalog_equipment', ['id' => $receipt['resourceId'], 'workshop_id' => $actor->workshopId, 'name' => 'Perceuse %_ électrique', 'category' => 'Outillage', 'description' => 'Description française', 'total_quantity' => 2, 'is_active' => true, 'version' => 1]);
         $this->assertDatabaseHas('operation_receipts', ['operation_key' => $input['operationKey'], 'actor_id' => $actor->actorId, 'resource_id' => $receipt['resourceId']]);
-        $this->get('/gestion/materiels/'.$receipt['resourceId'])->assertInertia(fn (Assert $page) => $page->component('Manager/Catalog/Show')->where('equipment.totalQuantity', 2)->where('equipment.image', null));
+        $this->get('/gestion/materiels/'.$receipt['resourceId'])->assertInertia(fn (Assert $page) => $page->component('Manager/Catalog/Show')->where('equipment.totalQuantity', 2)->where('equipment.image', null)->where('equipment.description', 'Description française'));
+        $this->getJson('/gestion/materiels/'.$receipt['resourceId'].'/lecture')->assertOk()->assertJsonPath('description', 'Description française');
     }
 
     public function test_detail_resolves_its_own_durable_receipt_when_the_temporary_confirmation_is_gone(): void
@@ -279,7 +285,33 @@ final class EquipmentManagementTest extends TestCase
     {
         $this->prepare('atelier-1-staff');
         $this->get('/gestion/materiels')->assertForbidden();
+        $this->getJson('/gestion/materiels/lectures')->assertForbidden();
         $this->post('/gestion/materiels', $this->input())->assertForbidden();
+    }
+
+    #[DataProvider('nonManagers')]
+    public function test_summary_reads_require_the_manager_capability_for_every_supplied_audience(string $login): void
+    {
+        $actor = $this->prepare($login);
+
+        foreach ([CatalogAudience::Catalog, CatalogAudience::Management] as $audience) {
+            $this->assertThrows(fn () => app(ReadEquipmentAction::class)->managementPage($actor, new EquipmentQuery(audience: $audience)), AuthorizationException::class);
+        }
+        $this->getJson('/gestion/materiels/lectures')->assertForbidden();
+    }
+
+    public function test_summary_reads_obey_the_management_policy_for_direct_and_http_calls(): void
+    {
+        $actor = $this->prepare();
+        Gate::before(
+            /** @param array<array-key, mixed> $arguments */
+            static function (?Authenticatable $user, string $ability, array $arguments): ?bool {
+                return $ability === 'viewAny' && ($arguments[0] ?? null) === Equipment::class ? false : null;
+            });
+
+        $this->assertThrows(fn () => app(ReadEquipmentAction::class)->managementPage($actor, new EquipmentQuery), AuthorizationException::class);
+        $this->get('/gestion/materiels')->assertForbidden();
+        $this->getJson('/gestion/materiels/lectures')->assertForbidden();
     }
 
     public function test_read_operation_recovers_a_committed_result_but_absence_does_not_claim_rollback(): void
@@ -291,6 +323,171 @@ final class EquipmentManagementTest extends TestCase
         $this->getJson('/gestion/materiels/operations?'.http_build_query($query))->assertOk()->assertJsonPath('status', 'applied')->assertJsonPath('receipt.operationKey', $input['operationKey']);
         $query['operationKey'] = (string) Str::uuid7();
         $this->getJson('/gestion/materiels/operations?'.http_build_query($query))->assertOk()->assertExactJson(['status' => 'notEstablished', 'receipt' => null]);
+    }
+
+    public function test_closing_an_unreceived_creation_returns_a_durable_closure_without_equipment_or_notification(): void
+    {
+        $actor = $this->prepare();
+        $this->travelTo('2026-10-26T12:30:00.123Z');
+        Queue::fake([PublishCatalogInvalidation::class]);
+        $payload = ['operationType' => CreateEquipmentAction::OPERATION, 'operationKey' => (string) Str::uuid7()];
+        $equipmentBefore = DB::table('catalog_equipment')->count();
+        $expected = ['status' => 'closed', 'receipt' => null, 'closure' => [...$payload, 'closedAt' => '2026-10-26T12:30:00.123Z']];
+
+        $this->postJson('/gestion/materiels/operations/cloture', $payload)
+            ->assertOk()->assertHeader('Cache-Control', 'no-store, private')->assertExactJson($expected);
+        $this->postJson('/gestion/materiels/operations/cloture', $payload)->assertOk()->assertExactJson($expected);
+        $this->getJson('/gestion/materiels/operations?'.http_build_query($payload))->assertOk()->assertExactJson($expected);
+
+        $this->assertSame($equipmentBefore, DB::table('catalog_equipment')->count());
+        $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $payload['operationKey'])->count());
+        $this->assertDatabaseHas('operation_receipts', ['workshop_id' => $actor->workshopId, 'actor_id' => $actor->actorId, 'operation_key' => $payload['operationKey'], 'status' => 'closed', 'input_sha256' => null, 'resource_type' => null, 'resource_id' => null, 'equipment_id' => null, 'result_version' => null]);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_resolution_finds_the_original_success_without_closing_or_changing_its_equipment(): void
+    {
+        $this->prepare();
+        $input = $this->input();
+        $this->post('/gestion/materiels', $input)->assertRedirect();
+        $receipt = json_decode(session('catalogReceipt'), true, flags: JSON_THROW_ON_ERROR);
+        Queue::fake([PublishCatalogInvalidation::class]);
+
+        $this->postJson('/gestion/materiels/operations/cloture', ['operationType' => CreateEquipmentAction::OPERATION, 'operationKey' => $input['operationKey']])
+            ->assertOk()->assertExactJson(['status' => 'applied', 'receipt' => [...$receipt, 'replayed' => true]]);
+
+        $this->assertDatabaseHas('catalog_equipment', ['id' => $receipt['resourceId'], 'version' => 1, 'name' => 'Perceuse %_ électrique']);
+        $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $input['operationKey'])->count());
+        $this->assertDatabaseHas('operation_receipts', ['operation_key' => $input['operationKey'], 'status' => 'applied', 'resource_id' => $receipt['resourceId']]);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_a_late_creation_with_a_closed_key_gets_409_and_cannot_create_equipment(): void
+    {
+        $this->prepare();
+        $input = [...$this->input(), 'name' => 'Late creation '.Str::uuid7()];
+        $payload = ['operationType' => CreateEquipmentAction::OPERATION, 'operationKey' => $input['operationKey']];
+        $closed = $this->postJson('/gestion/materiels/operations/cloture', $payload)->assertOk()->json();
+        Queue::fake([PublishCatalogInvalidation::class]);
+
+        $this->postJson('/gestion/materiels', $input)->assertConflict()
+            ->assertJsonPath('issue.errorCode', 'operations.intent_closed')->assertJsonPath('issue.outcome', 'notApplied')->assertJsonPath('issue.nextAction.kind', 'reload');
+
+        $this->assertDatabaseMissing('catalog_equipment', ['name' => $input['name']]);
+        $this->getJson('/gestion/materiels/operations?'.http_build_query($payload))->assertOk()->assertExactJson($closed);
+        Queue::assertNothingPushed();
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function invalidClosures(): iterable
+    {
+        yield 'other command family' => [['operationType' => EditEquipmentTextAction::OPERATION]];
+        yield 'invalid key' => [['operationKey' => 'not-a-uuid']];
+        yield 'noncanonical key' => [['operationKey' => '019A000A-0000-7000-8000-000000000001']];
+        yield 'missing family' => [['operationType' => null]];
+        yield 'missing key' => [['operationKey' => null]];
+        yield 'client actor' => [['actorId' => '019a0000-0000-7000-8000-000000000001']];
+        yield 'client workshop' => [['workshopId' => '019a0000-0000-7000-8000-000000000001']];
+        yield 'content reconstruction' => [['name' => 'Reconstructed content']];
+    }
+
+    /** @param array<string, mixed> $changes */
+    #[DataProvider('invalidClosures')]
+    public function test_invalid_closure_inputs_get_422_without_recording_a_terminal_outcome(array $changes): void
+    {
+        $this->prepare();
+        $key = (string) Str::uuid7();
+        $before = DB::table('operation_receipts')->count();
+
+        $this->postJson('/gestion/materiels/operations/cloture', [...['operationType' => CreateEquipmentAction::OPERATION, 'operationKey' => $key], ...$changes])
+            ->assertUnprocessable()->assertJsonPath('issue.errorCode', 'validation.invalid_input');
+
+        $this->assertSame($before, DB::table('operation_receipts')->count());
+        $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $key]);
+    }
+
+    public function test_closure_requires_a_current_session_and_does_not_record_an_anonymous_request(): void
+    {
+        $key = (string) Str::uuid7();
+
+        $this->postJson('/gestion/materiels/operations/cloture', ['operationType' => CreateEquipmentAction::OPERATION, 'operationKey' => $key])->assertUnauthorized();
+
+        app(SqlUnit::class)->forActor($this->actor(), function () use ($key): void {
+            $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $key]);
+        });
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function nonManagers(): iterable
+    {
+        yield 'staff' => ['atelier-1-staff'];
+        yield 'borrower' => ['atelier-1-borrower-1'];
+    }
+
+    #[DataProvider('nonManagers')]
+    public function test_a_non_manager_cannot_close_a_creation_by_http_or_direct_action(string $login): void
+    {
+        $actor = $this->prepare($login);
+        $key = (string) Str::uuid7();
+
+        $this->postJson('/gestion/materiels/operations/cloture', ['operationType' => CreateEquipmentAction::OPERATION, 'operationKey' => $key])->assertForbidden();
+
+        try {
+            app(CloseEquipmentOperationAction::class)->handle($actor, $key);
+            $this->fail('Closure did not consult the current capability.');
+        } catch (AuthorizationException) {
+            $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $key]);
+        }
+    }
+
+    public function test_closure_consults_the_registered_policy_without_recording_a_refused_operation(): void
+    {
+        $actor = $this->prepare();
+        $key = (string) Str::uuid7();
+        Gate::before(static function (?Authenticatable $user, string $ability): ?bool {
+            return $ability === 'create' ? false : null;
+        });
+
+        try {
+            app(CloseEquipmentOperationAction::class)->handle($actor, $key);
+            $this->fail('Closure did not consult the equipment policy.');
+        } catch (AuthorizationException) {
+            $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $key]);
+        }
+    }
+
+    public function test_resolution_cannot_read_or_close_another_managers_success(): void
+    {
+        $actor = $this->prepare();
+        $foreign = $this->actor('atelier-2-manager');
+        DB::select("SELECT set_config('epr.workshop_id', ?, true), set_config('epr.actor_id', ?, true), set_config('epr.actor_role','manager',true)", [$foreign->workshopId, $foreign->actorId]);
+        $receipt = app(CreateEquipmentAction::class)->handle($foreign, new EquipmentInput('Foreign closure fixture', 'Synthetic', null), 0, (string) Str::uuid7());
+        DB::select("SELECT set_config('epr.workshop_id', ?, true), set_config('epr.actor_id', ?, true)", [$actor->workshopId, $actor->actorId]);
+        $payload = ['operationType' => CreateEquipmentAction::OPERATION, 'operationKey' => $receipt->operationKey];
+
+        $own = $this->postJson('/gestion/materiels/operations/cloture', $payload)->assertOk()->assertJsonPath('status', 'closed')->assertJsonPath('receipt', null)->json();
+
+        $this->assertSame($receipt->operationKey, $own['closure']['operationKey']);
+        $this->assertDatabaseHas('operation_receipts', ['actor_id' => $actor->actorId, 'operation_key' => $receipt->operationKey, 'status' => 'closed']);
+        $this->assertDatabaseMissing('operation_receipts', ['actor_id' => $foreign->actorId, 'operation_key' => $receipt->operationKey]);
+        DB::select("SELECT set_config('epr.workshop_id', ?, true), set_config('epr.actor_id', ?, true)", [$foreign->workshopId, $foreign->actorId]);
+        $this->assertDatabaseHas('operation_receipts', ['actor_id' => $foreign->actorId, 'operation_key' => $receipt->operationKey, 'status' => 'applied', 'resource_id' => $receipt->resourceId]);
+        $this->assertDatabaseHas('catalog_equipment', ['id' => $receipt->resourceId]);
+    }
+
+    public function test_the_twenty_closure_limit_returns_429_but_keeps_the_read_endpoint_available(): void
+    {
+        $this->prepare();
+        $payload = ['operationType' => CreateEquipmentAction::OPERATION, 'operationKey' => (string) Str::uuid7()];
+        $closed = null;
+        for ($attempt = 0; $attempt < 20; $attempt++) {
+            $closed = $this->postJson('/gestion/materiels/operations/cloture', $payload)->assertOk()->json();
+        }
+
+        $this->postJson('/gestion/materiels/operations/cloture', $payload)->assertTooManyRequests()->assertHeader('Retry-After');
+
+        $this->getJson('/gestion/materiels/operations?'.http_build_query($payload))->assertOk()->assertExactJson($closed);
+        $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $payload['operationKey'])->count());
     }
 
     public function test_literal_case_insensitive_search_and_exact_category_preserve_stable_pagination(): void
@@ -309,6 +506,15 @@ final class EquipmentManagementTest extends TestCase
         sort($ids);
         $this->assertSame($ids, [$first->items[0]->equipmentId, $second->items[0]->equipmentId]);
         $this->assertSame([], $read->handle($actor, new EquipmentQuery('%_ éle', 'outillage', audience: CatalogAudience::Management))->items);
+        $summary = app(ReadEquipmentAction::class);
+        $summaryFirst = $summary->managementPage($actor, new EquipmentQuery('%_ éle', 'Outillage', 1, 1));
+        $summarySecond = $summary->managementPage($actor, new EquipmentQuery('%_ éle', 'Outillage', 2, 1));
+        $this->assertSame($ids, [$summaryFirst->items[0]->equipmentId, $summarySecond->items[0]->equipmentId]);
+        $this->assertTrue($summaryFirst->hasMore);
+        $this->assertFalse($summarySecond->hasMore);
+        $this->assertSame([1, 2, 1, 1], [$summaryFirst->page, $summarySecond->page, $summaryFirst->perPage, $summarySecond->perPage]);
+        $this->assertSame([], $summary->managementPage($actor, new EquipmentQuery('%_ éle', 'outillage'))->items);
+        $this->assertSame([], $summary->managementPage($actor, new EquipmentQuery('absent-fragment', 'Outillage'))->items);
         $this->getJson('/gestion/materiels/lectures?perPage=101')->assertUnprocessable();
     }
 
@@ -320,6 +526,8 @@ final class EquipmentManagementTest extends TestCase
         $equipment = EquipmentFactory::new()->createOne(['workshop_id' => $foreign['workshopId']]);
         DB::select("SELECT set_config('epr.workshop_id', ?, true), set_config('epr.actor_id', ?, true)", [$actor->workshopId, $actor->actorId]);
         $this->assertSame([], app(ReadEquipmentBatch::class)->handle($actor, [$equipment->id]));
+        $this->assertSame([], app(ReadEquipmentAction::class)->managementPage($actor, new EquipmentQuery(category: $equipment->category))->items);
+        $this->getJson('/gestion/materiels/lectures?'.http_build_query(['category' => $equipment->category]))->assertOk()->assertJsonCount(0, 'items');
         $this->getJson('/gestion/materiels/'.$equipment->id.'/lecture')->assertNotFound()->assertJsonPath('issue.errorCode', 'identity_access.resource_unavailable');
         $this->getJson('/gestion/materiels/'.Str::uuid7().'/lecture')->assertNotFound()->assertJsonPath('issue.errorCode', 'identity_access.resource_unavailable');
         $permissions = DB::selectOne("SELECT has_table_privilege(current_user,'epr.operation_receipts','UPDATE') AS receipt_update, has_table_privilege(current_user,'epr.operation_receipts','DELETE') AS receipt_delete, has_table_privilege(current_user,'epr.catalog_equipment','DELETE') AS equipment_delete");
@@ -367,7 +575,8 @@ final class EquipmentManagementTest extends TestCase
     {
         $actor = $this->prepare();
         $category = '__a03_cost_'.Str::uuid7();
-        $rows = EquipmentFactory::new()->count(101)->create(['workshop_id' => $actor->workshopId, 'category' => $category]);
+        $description = 'Description complète sentinelle 🧰';
+        $rows = EquipmentFactory::new()->count(101)->create(['workshop_id' => $actor->workshopId, 'category' => $category, 'description' => $description]);
         $ids = $rows->pluck('id')->all();
         $connection = DB::connection('pgsql');
         $connection->enableQueryLog();
@@ -378,6 +587,7 @@ final class EquipmentManagementTest extends TestCase
                 $page = app(ReadEquipmentPage::class)->handle($actor, new EquipmentQuery(category: $category, perPage: $limit, audience: CatalogAudience::Management));
                 $this->assertCount($limit, $page->items);
                 $this->assertTrue($page->hasMore);
+                $this->assertSame(array_fill(0, $limit, $description), array_column($page->items, 'description'));
                 $queries = $connection->getQueryLog();
                 $equipmentQueries = array_values(array_filter($queries, static fn (array $query): bool => str_contains($query['query'], 'from "catalog_equipment"')));
                 $this->assertCount(1, $equipmentQueries);
@@ -388,6 +598,7 @@ final class EquipmentManagementTest extends TestCase
                 $connection->flushQueryLog();
                 $batch = app(ReadEquipmentBatch::class)->handle($actor, array_slice($ids, 0, $limit));
                 $this->assertCount($limit, $batch);
+                $this->assertSame(array_fill(0, $limit, $description), array_column($batch, 'description'));
                 $this->assertCount(1, array_filter($connection->getQueryLog(), static fn (array $query): bool => str_contains($query['query'], 'from "catalog_equipment"')));
             }
             $this->assertSame($counts[0], $counts[1]);
@@ -402,6 +613,77 @@ final class EquipmentManagementTest extends TestCase
         } finally {
             $connection->disableQueryLog();
         }
+    }
+
+    #[DataProvider('managementOutputs')]
+    public function test_management_pages_select_and_hydrate_only_summary_fields(bool $json): void
+    {
+        $actor = $this->prepare();
+        $category = '__af07_projection_'.Str::uuid7();
+        $rows = EquipmentFactory::new()->sequence(['is_active' => false], ['is_active' => true])->state([
+            'workshop_id' => $actor->workshopId,
+            'name' => 'Synthetic summary',
+            'category' => $category,
+            'description' => str_repeat('🧰', 2000),
+        ])->createMany(101);
+        $first = $rows->sortBy('id')->firstOrFail();
+        $connection = DB::connection('pgsql');
+        $hydrated = $this->hydrationCapture();
+        Equipment::retrieved(static function (Equipment $equipment) use ($connection, $hydrated): void {
+            if ($connection->logging()) {
+                $hydrated->append(array_keys($equipment->getAttributes()));
+            }
+        });
+        $expectedColumns = ['category', 'id', 'is_active', 'name', 'total_quantity', 'version', 'workshop_id'];
+        $connection->enableQueryLog();
+        try {
+            foreach ([1, 25, 100] as $size) {
+                $connection->flushQueryLog();
+                $hydrated->exchangeArray([]);
+                $url = ($json ? '/gestion/materiels/lectures' : '/gestion/materiels').'?'.http_build_query(['category' => $category, 'perPage' => $size]);
+                $response = ($json ? $this->getJson($url) : $this->get($url))->assertOk();
+                $queries = array_values(array_filter($connection->getQueryLog(), static fn (array $query): bool => str_contains($query['query'], 'from "catalog_equipment"')));
+                $this->assertCount(1, $queries);
+                $this->assertStringNotContainsString('description', $queries[0]['query']);
+                $this->assertStringNotContainsString('*', $queries[0]['query']);
+                $this->assertGreaterThanOrEqual($size, count($hydrated));
+                $this->assertLessThanOrEqual($size + 1, count($hydrated));
+                foreach ($hydrated as $columns) {
+                    sort($columns);
+                    $this->assertSame($expectedColumns, $columns);
+                }
+                $payload = $json ? $response->json() : json_decode(json_encode($response->viewData('page')['props']['catalogPage'], JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
+                $this->assertCount($size, $payload['items']);
+                $this->assertSame(1, $payload['page']);
+                $this->assertSame($size, $payload['perPage']);
+                $this->assertTrue($payload['hasMore']);
+                $this->assertSame(['equipmentId', 'name', 'category', 'totalQuantity', 'status', 'equipmentVersion', 'image'], array_keys($payload['items'][0]));
+                $this->assertSame($first->id, $payload['items'][0]['equipmentId']);
+                $this->assertSame($first->is_active ? 'active' : 'archived', $payload['items'][0]['status']);
+            }
+
+            $connection->flushQueryLog();
+            $page = app(ReadEquipmentAction::class)->managementPage($actor, new EquipmentQuery(category: $category, perPage: 100));
+            $this->assertCount(100, $page->items);
+            $this->assertContains('archived', array_column($page->items, 'status'));
+            $before = count($connection->getQueryLog());
+            json_encode($page, JSON_THROW_ON_ERROR);
+            $this->assertCount($before, $connection->getQueryLog());
+        } finally {
+            $connection->disableQueryLog();
+        }
+    }
+
+    /** @return ArrayObject<int, list<string>> */
+    private function hydrationCapture(): ArrayObject
+    {
+        return new ArrayObject;
+    }
+
+    /** @return array<string, array{bool}> */
+    public static function managementOutputs(): array
+    {
+        return ['inertia' => [false], 'json' => [true]];
     }
 
     public function test_the_browser_list_sends_only_its_selected_fields_within_the_unicode_payload_budgets(): void

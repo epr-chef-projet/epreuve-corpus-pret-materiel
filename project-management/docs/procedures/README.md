@@ -7,8 +7,9 @@ Ces guides décrivent les méthodes réutilisables pour travailler avec la stack
 | Créer une nouvelle base Laravel                    | [Initialisation](initialisation.md)                     | 1.4     |
 | Préparer un poste et utiliser Docker/Sail          | [Environnement Docker](environnement-docker.md)         | 1.2     |
 | Organiser, partager et entretenir les références   | [Documentation et partage](documentation-et-partage.md) | 1.3     |
-| Préparer GitHub/CI, contribuer, revoir et intégrer | [GitHub et collaboration](github-et-collaboration.md)   | 1.4     |
+| Préparer GitHub/CI, contribuer, revoir et intégrer | [GitHub et collaboration](github-et-collaboration.md)   | 1.5     |
 | Construire, vérifier et publier une image          | [Image et registre](image-et-registre.md)               | 1.2     |
+| Auditer un périmètre et traiter les constats       | [Audit et correction](audit-and-remediation.md)         | 1.2     |
 
 Pour installer un clone de ce projet, suivre la [recette d'installation](../interne/developpement/installation.md) ; ne pas recréer un squelette. Les guides expliquent les méthodes générales ; la recette du projet fixe les commandes et paramètres de sa copie existante. Choisir les sections utiles à la tâche, sans charger tous les guides.
 

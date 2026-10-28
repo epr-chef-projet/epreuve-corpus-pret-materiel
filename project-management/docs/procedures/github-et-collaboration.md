@@ -1,6 +1,6 @@
 # Préparer GitHub, contribuer et recevoir la version commune
 
-**Version 1.4 - contenu validé ; parcours opérationnel à exercer.** Commandes et capacités examinées dans les sources officielles citées ; vérifier les outils, l'offre et les droits réellement disponibles avant application.
+**Version 1.5 - contenu validé ; parcours opérationnel à exercer.** Commandes et capacités examinées dans les sources officielles citées ; vérifier les outils, l'offre et les droits réellement disponibles avant application.
 
 **Résultat :** un dépôt identifiable, des accès et contrôles reçus, des contributions revues selon les responsabilités, puis une révision intégrée dont la CI est vérifiée. Ce parcours concerne les projets retenant GitHub et le circuit validation locale préalable → CI → intégration contrôlée. Il s'arrête à la version commune vérifiée ; image, registre et déploiement ont leurs procédures propres.
 
@@ -239,6 +239,8 @@ Dans CODEOWNERS, désigner les personnes/équipes reçues, notamment pour les fi
 Avant ouverture aux contributeurs, éprouver sur des références de qualification identifiées : parcours permis, revue manquante pour un contributeur, check manquant/échoué/sauté/annulé, mauvaise source de statut et changements directs interdits par le profil. Vérifier aussi les propres contributions du responsable : dispense de revue reçue, CI/intégrité conservées. Qualifier les refus dans le mécanisme réel, en protégeant les références actives, sans plateforme de tests supplémentaire ni purge globale.
 
 ## 5. Contribuer sur une branche et faire revoir
+
+Effectuer la revue de chaque petit lot cohérent selon [R01-014](../../../.ai/rules/socle/01-noyau-agent.md#7-vérification-et-clôture), avant de commencer le suivant, sans attendre la demande de fusion.
 
 Recevoir le mandat et ses dépendances. Un lot dépendant d'une contribution commune attend sa référence intégrée reçue. Coordonner contrats, migrations, locks et générés partagés ; les [ressources Docker](environnement-docker.md#3-raccorder-et-isoler-les-services) sont isolées indépendamment des branches Git.
 

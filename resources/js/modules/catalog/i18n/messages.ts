@@ -61,6 +61,16 @@ export const catalogMessages = {
             pending:
                 'Le résultat de cet enregistrement est encore inconnu. Vérifie-le avant de le reprendre.',
             verify: 'Vérifier le résultat',
+            resolve: 'Résoudre cet envoi',
+            resolving: 'Résolution en cours…',
+            lostEntry:
+                'La saisie a été perdue. Retrouvez le matériel ou fermez cet envoi.',
+            resolveUnknown:
+                'La résolution reste à vérifier. Réessaie avec le même bouton.',
+            resolveFailed:
+                'La résolution reste à vérifier. Réessaie lorsque la connexion est disponible.',
+            resolveLimited: 'Trop de tentatives. Réessaie dans {seconds} s.',
+            closed: 'Cet envoi est fermé. Tu peux créer un nouveau matériel.',
             checking: 'Vérification en cours…',
             notEstablished:
                 'Aucun reçu trouvé pour le moment. Cela ne prouve pas que l’enregistrement a échoué.',
@@ -88,6 +98,8 @@ export const catalogMessages = {
             operations: {
                 intent_mismatch:
                     'Cette clé correspond à un autre enregistrement. Vérifie le résultat précédent avant de créer une nouvelle intention.',
+                intent_closed:
+                    'Cet envoi a été fermé. Vérifie son résultat avant de créer un nouvel envoi.',
             },
         },
     },
@@ -153,6 +165,16 @@ export const catalogMessages = {
             pending:
                 'The result of this save is still unknown. Check it before resuming.',
             verify: 'Check the result',
+            resolve: 'Resolve this submission',
+            resolving: 'Resolving…',
+            lostEntry:
+                'Your entry was lost. Find the equipment or close this submission.',
+            resolveUnknown:
+                'The resolution still needs checking. Try again with the same button.',
+            resolveFailed:
+                'The resolution still needs checking. Try again when the connection is available.',
+            resolveLimited: 'Too many attempts. Try again in {seconds} s.',
+            closed: 'This submission is closed. You can create new equipment.',
             checking: 'Checking…',
             notEstablished:
                 'No receipt was found yet. This does not prove that the save failed.',
@@ -179,6 +201,8 @@ export const catalogMessages = {
             operations: {
                 intent_mismatch:
                     'This key describes another save. Check the previous result before starting a new intention.',
+                intent_closed:
+                    'This submission was closed. Check its result before starting a new submission.',
             },
         },
     },

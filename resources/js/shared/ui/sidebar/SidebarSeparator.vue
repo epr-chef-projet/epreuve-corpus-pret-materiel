@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue';
 import { cn } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
+import { Separator } from '@/shared/ui/separator';
 
 const props = defineProps<{
     class?: HTMLAttributes['class'];
@@ -9,11 +9,11 @@ const props = defineProps<{
 </script>
 
 <template>
-    <Input
-        data-slot="sidebar-input"
-        data-sidebar="input"
-        :class="cn('h-8 w-full bg-background shadow-none', props.class)"
+    <Separator
+        data-slot="sidebar-separator"
+        data-sidebar="separator"
+        :class="cn('mx-2 w-auto bg-sidebar-border', props.class)"
     >
         <slot />
-    </Input>
+    </Separator>
 </template>

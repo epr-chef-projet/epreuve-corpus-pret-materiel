@@ -148,6 +148,14 @@ IdentityAccess crée directement les trois tables `identity_access_workshops`, `
 
 Une installation neuve suit `migrate`, puis la préparation explicite des comptes ci-dessous. Une mise à jour ordinaire utilise également `migrate` et préserve les données. Après consolidation des migrations initiales selon R05-017, une base existante ne s'aligne pas par le seul changement des fichiers : appliquer uniquement après autorisation la procédure de reconstruction suivante. Une conservation sans reconstruction exige une compatibilité vérifiée de sa structure et de son historique `migrations`.
 
+### Recevoir la clôture des créations incertaines
+
+La migration `2026_10_26_174346_add_closed_outcomes_to_operation_receipts` ajoute le statut obligatoire `applied` ou `closed`. Les anciens reçus et les insertions antérieures restent `applied` avec leurs valeurs et relations. Une clôture de création conserve seulement la portée et la date ; les contraintes refusent tout résultat fictif. Unicité, propriétaire, RLS forcée et droits applicatifs de lecture/insertion restent inchangés.
+
+Prérequis : sauvegardes vérifiées, structure et historique attendus, accès migrateur existant et créneau permettant le verrou bref. Suivre [Migrer avec l'identité réservée](#migrer-avec-lidentité-réservée), explicitement pour `testing` puis `laravel`, avant d'activer les nouveaux lecteurs. `migrate --no-interaction` applique cette seule migration en attente, ou annonce l'absence de travail si elle est déjà reçue ; `migrate:status --no-interaction` la montre appliquée. Elle borne le verrou à deux secondes et l'instruction à cinq secondes ; un échec n'autorise ni forçage ni reset. Vérifier les anciennes valeurs, les nouvelles contraintes, les droits et les tests concernés après évolution. Aucun semis, nouvelle clé ou effacement n'est nécessaire.
+
+Après activation, le [contrat de résolution](../architecture/contrats-et-lots.md#resolution-creation) permet de retrouver un succès ou de fermer une intention de création sans matériel. Dès qu'une clôture existe, un ancien lecteur ignorant `closed` ne constitue plus un retour compatible. Le `down()` refuse le retrait de ce schéma ; conserver les traces et leurs gardes, puis préparer une correction compatible en avant. Une restauration des bases actives reste une opération distincte à autoriser.
+
 ### Aligner les familles de reçus Catalog sans reconstruire
 
 La création initiale de `operation_receipts` admet directement création, édition textuelle, archivage et réactivation. `migrate` ne réexécute pas une migration déjà enregistrée. Pour une installation conservant la version initiale à deux familles, vérifier la copie et son service PostgreSQL, les sauvegardes lisibles selon la procédure ci-dessous, puis l'historique complet des migrations et le schéma réel. Les deux migrations Catalog/reçus doivent déjà être enregistrées ensemble ; leurs noms et lots restent inchangés. Toute autre dérive demande inspection avant adaptation.
@@ -207,12 +215,36 @@ sha256sum "$backup_file" > "$backup_dir/sha256.txt"
 
 Arrêter au premier code non nul. L'inventaire et le décodage vérifient la lisibilité complète de l'archive, sans restaurer ni modifier une autre base ; ils ne remplacent pas un exercice de restauration. Conserver aussi une copie privée du reçu avant la suite.
 
-4. `migrate:fresh` ne supprime pas les fonctions PostgreSQL. Sur une cible possédant les sept fonctions IdentityAccess, les retirer explicitement, après examen de leurs signatures et dépendances, avec la même cible migratrice vérifiée :
+4. Dans ce schéma, `migrate:fresh` ne retire pas les huit fonctions IdentityAccess. Après recontrôle de la cible migratrice, inventorier leurs signatures, définitions, propriétaires et permissions, puis les objets qui en dépendent. Les lectures suivantes ne modifient pas la base :
+
+```sh
+./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$migration_database" migrator tinker --execute '
+dump(DB::select("
+SELECT n.nspname AS schema, p.proname AS name, oidvectortypes(p.proargtypes) AS arguments,
+       p.prokind AS kind, pg_get_userbyid(p.proowner) AS owner, l.lanname AS language,
+       p.prosecdef AS security_definer, p.proconfig AS settings, p.proacl AS direct_acl,
+       has_function_privilege(?,p.oid,?) AS public_execute,
+       has_function_privilege(?,p.oid,?) AS app_execute,
+       has_function_privilege(?,p.oid,?) AS lookup_execute,
+       pg_get_functiondef(p.oid) AS definition
+FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_language l ON l.oid=p.prolang
+WHERE n.nspname=? AND left(p.proname,16)=?
+ORDER BY p.proname,p.proargtypes",
+["public", "EXECUTE", "epr_app", "EXECUTE", "epr_auth_lookup", "EXECUTE", "epr", "identity_access_"]));
+dump(DB::select("SELECT p.proname AS name, oidvectortypes(p.proargtypes) AS arguments, pg_describe_object(d.classid,d.objid,d.objsubid) AS dependent FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_depend d ON d.refclassid=p.tableoid AND d.refobjid=p.oid WHERE n.nspname=? AND left(p.proname,16)=? ORDER BY p.proname,dependent", ["epr", "identity_access_"]));'
+```
+
+Attendus sur une base existante conforme : exactement les huit signatures du bloc de retrait ci-dessous, sans surcharge supplémentaire, toutes de nature fonction (`kind=f`) et possédées par `epr_owner`. Définitions et permissions correspondent aux [capacités IdentityAccess](../../../../app/Modules/IdentityAccess/Database/Migrations/2026_10_19_090917_create_identity_access_capabilities.php) et au [routage des sessions](../../../../app/Modules/IdentityAccess/Database/Migrations/2026_10_20_144632_add_identity_access_session_routing.php), avec les seuls droits locaux déjà autorisés et inventoriés. Les colonnes `public_execute`, `app_execute` et `lookup_execute` vérifient les droits effectifs, y compris hérités, à confronter aux `GRANT`/`REVOKE` de ces migrations. `direct_acl` expose seulement les ACL directes ; compléter le contrôle pour chaque rôle local inventorié. La seconde lecture ne renvoie aucun objet dépendant dans ce schéma livré.
+
+Les huit corps sont définis en texte `AS $$...$$` : PostgreSQL ne suit pas toutes leurs références internes dans `pg_depend`. Relire aussi les corps et leurs consommateurs, même si la seconde lecture est vide ; voir les [dépendances PostgreSQL](https://www.postgresql.org/docs/18/ddl-depend.html). Un inventaire partiel, une surcharge, une définition, un propriétaire, un droit ou une dépendance inattendus impose une inspection avant tout retrait ou `migrate:fresh`. Sur une base réellement neuve, sans tables ni historique ni ces fonctions, reprendre l'installation initiale avec `migrate` : aucun retrait n'est nécessaire.
+
+Pour la seule cible existante conforme dont la reconstruction est autorisée, consommateurs arrêtés et sauvegarde vérifiée, retirer d'abord la fonction de routage, puis les sept capacités dans l'ordre inverse de leur création. Avec la même cible migratrice recontrôlée :
 
 ```sh
 ./vendor/bin/sail --profile tools run --rm --no-deps -T -e DB_DATABASE="$migration_database" migrator tinker --execute '
 DB::transaction(function (): void {
-    DB::unprepared("DROP FUNCTION epr.identity_access_admit_session(text,uuid,text);
+    DB::unprepared("DROP FUNCTION epr.identity_access_session_candidates(jsonb,uuid,uuid,integer);
+DROP FUNCTION epr.identity_access_admit_session(text,uuid,text);
 DROP FUNCTION epr.identity_access_assert_actor(uuid,uuid,text);
 DROP FUNCTION epr.identity_access_revoke_session(text);
 DROP FUNCTION epr.identity_access_start_session(uuid,uuid,text,text,text);
@@ -222,7 +254,7 @@ DROP FUNCTION epr.identity_access_find_identity(text);");
 });'
 ```
 
-Une base neuve sans ces fonctions ne nécessite pas leur retrait. Un inventaire partiel ou différent nécessite une inspection ; ne pas ajouter `CASCADE` ou masquer la dérive pour poursuivre. Après une interruption, constater les objets réellement présents avant reprise.
+Attendu après commit : aucune des huit fonctions ne subsiste, ce que la première lecture d'inventaire permet de constater. Tout échec de retrait annule cette transaction et interdit de poursuivre vers la suppression des tables. Ne pas ajouter `CASCADE`, `IF EXISTS` ou masquer la dérive pour continuer ; le retrait conserve le [refus des dépendances](https://www.postgresql.org/docs/18/sql-dropfunction.html) par défaut. Après interruption ou perte de réponse, constater les objets réellement présents avant reprise, sans supposer le rollback ni rejouer aveuglément le bloc.
 
 5. Reconstruire les tables, sans semis global et sans dépendre des anciens `down()` :
 
@@ -234,7 +266,7 @@ Une base neuve sans ces fonctions ne nécessite pas leur retrait. Un inventaire 
 Vérifier ensuite structure finale, propriétaires `epr_owner`, fonctions, contraintes et permissions effectives. Les créations et leurs révocations sont transactionnelles ; aucun rôle applicatif ne devient propriétaire. Les `down()` des migrations retirent leurs objets et ne restaurent aucune donnée supprimée. Une reprise depuis sauvegarde nécessite le code et la procédure de restauration correspondant à cette sauvegarde.
 
 6. Après reconstruction vérifiée de la cible, archiver son seul ancien reçu `.epr-local/identity-<base>.json` dans le dossier privé de l'opération, sans écraser de fichier existant. Ne pas nettoyer globalement `.epr-local/`. Puis exécuter la préparation explicite ci-dessous avec `DB_DATABASE` et `--target` désignant cette même base. Vérifier deux ateliers et huit comptes, les identifiants et rôles attendus et la concordance du nouveau reçu avec SQL. Les nouveaux UUID rendent les anciennes connexions caduques ; les logins et le mot de passe synthétique restent ceux de la recette. Si la préparation est interrompue, comparer reçu et base avant de reprendre, sans effacer aveuglément le reçu.
-7. Réappliquer les seuls droits locaux de consultation qui étaient déjà autorisés : la recréation des tables retire leurs grants particuliers. Ne pas inscrire de rôle propre à un poste dans les migrations communes, ni ouvrir les métadonnées de sessions. Conserver les secrets et les rôles existants.
+7. Vérifier les permissions communes rétablies par les migrations, puis réappliquer les seuls droits locaux de consultation déjà autorisés et inventoriés : la recréation des tables et fonctions retire leurs grants particuliers. Aucun droit `EXECUTE` supplémentaire n'est implicite. Ne pas inscrire de rôle propre à un poste dans les migrations communes, ni ouvrir les métadonnées de sessions. Conserver les secrets et les rôles existants.
 8. Reprendre les services selon le démarrage quotidien, vérifier HTTP, connexion/déconnexion, SQL/Redis et accès de consultation, puis les tests sur `testing`. Ne purger ni Redis ni les volumes. Traiter chaque autre cible uniquement dans son autorisation et après ses propres contrôles/sauvegardes.
 
 ### Préparer explicitement les comptes synthétiques

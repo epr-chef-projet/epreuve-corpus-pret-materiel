@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace App\Modules\Catalog\Equipment\Http;
 
 use App\Modules\Catalog\Equipment\UseCases\ChangeEquipmentState\ChangeEquipmentStateAction;
+use App\Modules\Catalog\Equipment\UseCases\CloseEquipmentOperation\CloseEquipmentOperationAction;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\EditEquipmentText\EditEquipmentTextAction;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\EquipmentQueryFactory;
-use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\ManagementPageData;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\ReadEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipmentOperation\ReadEquipmentOperationAction;
 use App\Modules\Catalog\Equipment\UseCases\SaveEquipment\EquipmentInputFactory;
-use App\Modules\Catalog\PublicApi\ReadEquipmentPage;
 use App\Modules\IdentityAccess\PublicApi\ResolveActor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -30,12 +29,12 @@ final class CatalogController
         return ['commandReceipt' => json_decode((string) $request->session()->get('catalogReceipt', 'null'), true), 'issue' => json_decode((string) $request->session()->get('catalogIssue', 'null'), true)];
     }
 
-    public function index(Request $request, EquipmentQueryFactory $queries, ReadEquipmentPage $read): Response
+    public function index(Request $request, EquipmentQueryFactory $queries, ReadEquipmentAction $read): Response
     {
         $actor = $this->actors->handle($request);
         $query = $queries->management($request->query());
 
-        return Inertia::render('Manager/Catalog/Index', ['catalogPage' => ManagementPageData::fromPage($read->handle($actor, $query)), 'catalogQuery' => $query, ...$this->messages($request)]);
+        return Inertia::render('Manager/Catalog/Index', ['catalogPage' => $read->managementPage($actor, $query), 'catalogQuery' => $query, ...$this->messages($request)]);
     }
 
     public function create(Request $request): Response
@@ -75,9 +74,9 @@ final class CatalogController
         return to_route('catalog.show', ['equipment' => $receipt->resourceId])->with('catalogReceipt', json_encode($receipt, JSON_THROW_ON_ERROR));
     }
 
-    public function page(Request $request, EquipmentQueryFactory $queries, ReadEquipmentPage $read): JsonResponse
+    public function page(Request $request, EquipmentQueryFactory $queries, ReadEquipmentAction $read): JsonResponse
     {
-        return response()->json(ManagementPageData::fromPage($read->handle($this->actors->handle($request), $queries->management($request->query()))), options: JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)->header('Cache-Control', 'private, no-store');
+        return response()->json($read->managementPage($this->actors->handle($request), $queries->management($request->query())), options: JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)->header('Cache-Control', 'private, no-store');
     }
 
     public function archive(Request $request, string $equipment, EquipmentInputFactory $inputs, ChangeEquipmentStateAction $change): RedirectResponse
@@ -108,6 +107,15 @@ final class CatalogController
     {
         $valid = $inputs->operation($request->query());
         $result = $read->handle($this->actors->handle($request), $valid['operationType'], $valid['operationKey']);
+
+        return response()->json($result)->header('Cache-Control', 'private, no-store');
+    }
+
+    public function closeOperation(Request $request, EquipmentInputFactory $inputs, CloseEquipmentOperationAction $close): JsonResponse
+    {
+        $valid = $inputs->closeOperation($request->all());
+        $request->attributes->set('operationKey', $valid['operationKey']);
+        $result = $close->handle($this->actors->handle($request), $valid['operationKey']);
 
         return response()->json($result)->header('Cache-Control', 'private, no-store');
     }

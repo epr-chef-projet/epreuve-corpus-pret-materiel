@@ -1,6 +1,7 @@
 import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import {
+    isOperationClosure,
     isReceipt,
     operationTypes,
     record,
@@ -177,6 +178,29 @@ export function usePendingOperations() {
             ),
         );
     }
+    function finishClosed(closure: unknown): boolean {
+        if (
+            !current() ||
+            !isOperationClosure(closure) ||
+            !proofs.value.some(
+                (proof) =>
+                    proof.operationKey === closure.operationKey &&
+                    proof.operationType === closure.operationType &&
+                    proof.resourceId === null &&
+                    proof.expectedVersion === null,
+            )
+        )
+            return false;
+        sendingByScope.get(scope)?.delete(closure.operationKey);
+        persist(
+            proofs.value.filter(
+                (proof) =>
+                    proof.operationKey !== closure.operationKey ||
+                    proof.operationType !== closure.operationType,
+            ),
+        );
+        return true;
+    }
     function reject(operationKey: string) {
         if (current()) {
             sendingByScope.get(scope)?.delete(operationKey);
@@ -226,6 +250,7 @@ export function usePendingOperations() {
         ready,
         begin,
         finish,
+        finishClosed,
         reject,
         markSending,
         endSending,

@@ -1103,6 +1103,278 @@ test('a response lost after commit is verified without a duplicate and without p
     ).toBeVisible();
 });
 
+for (const width of [1280, 360]) {
+    test(`an unreceived creation is resolved after reload without losing a new draft at ${width}px`, async ({
+        page,
+    }) => {
+        await page.setViewportSize({ width, height: 900 });
+        let observedClosurePosts = 0;
+        page.on('request', (request) => {
+            if (
+                request.method() === 'POST' &&
+                new URL(request.url()).pathname ===
+                    '/gestion/materiels/operations/cloture'
+            )
+                observedClosurePosts++;
+        });
+        await signIn(page);
+        await page
+            .getByRole('link', { name: 'Créer un matériel', exact: true })
+            .click();
+        const name = 'Recovery original ' + randomUUID();
+        await page.getByLabel('Nom *', { exact: true }).fill(name);
+        await page
+            .getByLabel('Catégorie *', { exact: true })
+            .fill('Recovery tools');
+        let original: Record<string, unknown> | undefined;
+        await page.route('**/gestion/materiels', async (route) => {
+            if (route.request().method() !== 'POST') return route.continue();
+            original = route.request().postDataJSON() as Record<
+                string,
+                unknown
+            >;
+            await route.abort('failed');
+        });
+        await page
+            .getByRole('button', { name: 'Créer le matériel', exact: true })
+            .click();
+        await expect
+            .poll(() => original?.operationKey)
+            .toEqual(expect.any(String));
+        await page.unroute('**/gestion/materiels');
+        await page.reload();
+        await expect(page.getByLabel('Nom *', { exact: true })).toHaveValue('');
+        const lookup = await page.request.get(
+            '/gestion/materiels/operations?' +
+                new URLSearchParams({
+                    operationType: 'catalog.equipment.create',
+                    operationKey: String(original!.operationKey),
+                }).toString(),
+        );
+        expect(lookup.status()).toBe(200);
+        expect(await lookup.json()).toEqual({
+            status: 'notEstablished',
+            receipt: null,
+        });
+        const csrfRefused = await page.request.post(
+            '/gestion/materiels/operations/cloture',
+            {
+                headers: {
+                    Accept: 'application/json',
+                    'X-XSRF-TOKEN': 'invalid-test-token',
+                },
+                data: {
+                    operationType: 'catalog.equipment.create',
+                    operationKey: original!.operationKey,
+                },
+            },
+        );
+        expect(csrfRefused.status()).toBe(419);
+        const draft = 'Recovery new draft ' + randomUUID();
+        const field = page.locator('#equipment-name');
+        await field.fill(draft);
+        await page
+            .getByLabel('Catégorie *', { exact: true })
+            .fill('New draft tools');
+        await expect(
+            page.getByRole('button', {
+                name: 'Créer le matériel',
+                exact: true,
+            }),
+        ).toBeDisabled();
+        const minimalProof = await page.evaluate(() =>
+            sessionStorage.getItem('epr.pendingCatalogOperations'),
+        );
+        expect(minimalProof).not.toContain(name);
+        expect(minimalProof).toContain(String(original!.operationKey));
+        const resolve = page.getByRole('button', {
+            name: 'Résoudre cet envoi',
+            exact: true,
+        });
+        await expect(resolve).toBeVisible();
+        await expect(
+            page.getByRole('button', {
+                name: 'Vérifier le résultat',
+                exact: true,
+            }),
+        ).toHaveCount(0);
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+        expect(observedClosurePosts).toBe(0);
+        let closurePosts = 0;
+        let closureResponse: unknown;
+        let releaseResolution = () => {};
+        const heldResolution = new Promise<void>((release) => {
+            releaseResolution = release;
+        });
+        await page.route(
+            '**/gestion/materiels/operations/cloture',
+            async (route) => {
+                closurePosts++;
+                const response = await route.fetch();
+                expect(response.status()).toBe(200);
+                closureResponse = await response.json();
+                if (closurePosts === 1) await route.abort('failed');
+                else {
+                    await heldResolution;
+                    await route.fulfill({ response });
+                }
+            },
+        );
+        try {
+            expect(closurePosts).toBe(0);
+            await resolve.click();
+            await expect
+                .poll(() => closureResponse)
+                .toMatchObject({ status: 'closed', receipt: null });
+            await recoverAccess(page);
+            await expect(resolve).toBeEnabled();
+            await expect(field).toHaveValue(draft);
+            await expect(
+                page.getByRole('button', {
+                    name: 'Créer le matériel',
+                    exact: true,
+                }),
+            ).toBeDisabled();
+            const resolution =
+                width === 360
+                    ? page.getByRole('button', {
+                          name: 'Resolve this submission',
+                          exact: true,
+                      })
+                    : resolve;
+            if (width === 1280) {
+                await resolve.focus();
+                await page.keyboard.press('Enter');
+            } else {
+                await field.focus();
+                await resolve.evaluate((button: HTMLButtonElement) =>
+                    button.click(),
+                );
+            }
+            await expect.poll(() => closurePosts).toBe(2);
+            if (width === 360) {
+                await page
+                    .getByLabel('Langue de l’interface')
+                    .selectOption('en');
+                await expect(resolution).toBeDisabled();
+                const bounds = await resolution.boundingBox();
+                expect(bounds).not.toBeNull();
+                expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+                await field.focus();
+            }
+            releaseResolution();
+            expect(observedClosurePosts).toBe(2);
+            await expect(resolution).toHaveCount(0);
+            await expect(field).toHaveValue(draft);
+            if (width === 360) await expect(field).toBeFocused();
+            else
+                await expect(
+                    page
+                        .getByRole('status')
+                        .filter({ hasText: 'Cet envoi est fermé.' }),
+                ).toBeFocused();
+            const submit = page.getByRole('button', {
+                name: width === 360 ? 'Create equipment' : 'Créer le matériel',
+                exact: true,
+            });
+            await expect(submit).toBeEnabled();
+            const stored = await page.evaluate(() =>
+                sessionStorage.getItem('epr.pendingCatalogOperations'),
+            );
+            expect(stored).not.toContain(String(original!.operationKey));
+            await submit.click();
+            await expect(
+                page.getByRole('heading', { name: draft, exact: true }),
+            ).toBeVisible();
+        } finally {
+            releaseResolution();
+            await page.unroute('**/gestion/materiels/operations/cloture');
+        }
+    });
+}
+
+test('a closure in another tab releases the original intention after verification without replacing its draft', async ({
+    page,
+}) => {
+    await signIn(page);
+    await page
+        .getByRole('link', { name: 'Créer un matériel', exact: true })
+        .click();
+    await page
+        .getByLabel('Nom *', { exact: true })
+        .fill('Original tab draft ' + randomUUID());
+    await page
+        .getByLabel('Catégorie *', { exact: true })
+        .fill('Recovery tools');
+    let sent = false;
+    await page.route('**/gestion/materiels', async (route) => {
+        if (route.request().method() !== 'POST') return route.continue();
+        sent = true;
+        await route.abort('failed');
+    });
+    await page
+        .getByRole('button', { name: 'Créer le matériel', exact: true })
+        .click();
+    await expect.poll(() => sent).toBe(true);
+    await page.unroute('**/gestion/materiels');
+    await recoverAccess(page);
+    const draft = 'New original tab draft ' + randomUUID();
+    const field = page.getByLabel('Nom *', { exact: true });
+    await field.fill(draft);
+    const [other] = await Promise.all([
+        page.context().waitForEvent('page'),
+        page.evaluate(() => {
+            window.open(window.location.href, '_blank');
+        }),
+    ]);
+    observe(other);
+    try {
+        await expect(
+            other.getByRole('button', {
+                name: 'Résoudre cet envoi',
+                exact: true,
+            }),
+        ).toBeVisible();
+        await other
+            .getByRole('button', { name: 'Résoudre cet envoi', exact: true })
+            .click();
+        await expect(
+            other
+                .getByRole('status')
+                .filter({ hasText: 'Cet envoi est fermé.' }),
+        ).toBeVisible();
+        await expect(
+            page.getByRole('button', {
+                name: 'Créer le matériel',
+                exact: true,
+            }),
+        ).toBeDisabled();
+        await page
+            .getByRole('button', { name: 'Vérifier le résultat', exact: true })
+            .click();
+        await expect(
+            page
+                .getByRole('status')
+                .filter({ hasText: 'Cet envoi est fermé.' }),
+        ).toBeVisible();
+        await expect(field).toHaveValue(draft);
+        await expect(
+            page.getByRole('button', {
+                name: 'Créer le matériel',
+                exact: true,
+            }),
+        ).toBeEnabled();
+        await page
+            .getByRole('button', { name: 'Créer le matériel', exact: true })
+            .click();
+        await expect(
+            page.getByRole('heading', { name: draft, exact: true }),
+        ).toBeVisible();
+    } finally {
+        await other.close();
+    }
+});
+
 test('a lost response survives reload as a minimal proof and prevents a second creation', async ({
     page,
 }) => {
@@ -1137,7 +1409,7 @@ test('a lost response survives reload as a minimal proof and prevents a second c
         page.getByRole('button', { name: 'Créer le matériel', exact: true }),
     ).toBeDisabled();
     await page
-        .getByRole('button', { name: 'Vérifier le résultat', exact: true })
+        .getByRole('button', { name: 'Résoudre cet envoi', exact: true })
         .click();
     await expect(
         page

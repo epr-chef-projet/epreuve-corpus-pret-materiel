@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useTemplateRef } from 'vue';
 import PasswordInput from '@/components/PasswordInput.vue';
-import type { InputHandle } from '@/components/ui/input/types';
+import type { InputHandle } from '@/shared/ui/input/types';
 
 const field = useTemplateRef<InputHandle>('field');
 function focusPassword() {

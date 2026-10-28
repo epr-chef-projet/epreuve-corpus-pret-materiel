@@ -4,8 +4,8 @@ import { ref, useTemplateRef } from 'vue';
 import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 import type { HTMLAttributes } from 'vue';
-import { Input } from '@/components/ui/input';
-import type { InputHandle } from '@/components/ui/input/types';
+import { Input } from '@/shared/ui/input';
+import type { InputHandle } from '@/shared/ui/input/types';
 import { cn } from '@/lib/utils';
 
 defineOptions({ inheritAttrs: false });

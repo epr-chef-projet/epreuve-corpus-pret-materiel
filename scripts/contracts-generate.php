@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Infrastructure\Operations\ClosedOperationResultData;
 use App\Infrastructure\Operations\CommandReceipt;
+use App\Infrastructure\Operations\OperationClosureData;
 use App\Infrastructure\Operations\OperationResultData;
 use App\Modules\Catalog\Equipment\UseCases\ReadEquipment\ManagementPageData;
 use App\Modules\Catalog\PublicApi\CatalogAudience;
@@ -106,6 +108,7 @@ try {
         'managementPage' => ManagementPageData::fromPage(new EquipmentPage([$equipment], 1, 25, false, '2026-10-20T15:30:00.000Z')),
         'query' => new EquipmentQuery('%_', 'Outillage', audience: CatalogAudience::Management),
         'operation' => new OperationResultData('applied', new CommandReceipt($id, 'catalog.equipment.create', 'equipment', $id, 1, '2026-10-20T15:30:00.000Z', false)),
+        'closedOperation' => new ClosedOperationResultData(new OperationClosureData($id, '2026-10-20T15:30:00.000Z')),
     ];
     if (file_put_contents($root.'/tests/Frontend/generated/catalog.json', json_encode($catalog, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT).PHP_EOL) === false) {
         throw new RuntimeException('Could not write catalogue serialization.');
@@ -120,7 +123,7 @@ try {
         fwrite(STDERR, 'Generated outputs were missing or drifted; inspect before accepting regeneration.'.PHP_EOL);
         exit(1);
     }
-    echo json_encode(['outputs' => count($after), 'stable' => $before === $after, 'sampleOnly' => false, 'qualifiedProductContracts' => ['AuthenticatedUserData', 'SessionContextData', 'IssueData', 'ValidationPresentationData', 'NotificationEnvelopeData', 'SessionCandidatePage', 'EquipmentData', 'EquipmentPage', 'EquipmentQuery', 'CommandReceipt', 'OperationResultData']], JSON_THROW_ON_ERROR).PHP_EOL;
+    echo json_encode(['outputs' => count($after), 'stable' => $before === $after, 'sampleOnly' => false, 'qualifiedProductContracts' => ['AuthenticatedUserData', 'SessionContextData', 'IssueData', 'ValidationPresentationData', 'NotificationEnvelopeData', 'SessionCandidatePage', 'EquipmentData', 'EquipmentPage', 'EquipmentQuery', 'CommandReceipt', 'OperationResultData', 'OperationClosureData', 'ClosedOperationResultData']], JSON_THROW_ON_ERROR).PHP_EOL;
 
 } catch (Throwable $error) {
     fwrite(STDERR, json_encode(['errorClass' => $error::class, 'nativeCode' => $error->getCode(), 'messageOmitted' => true], JSON_THROW_ON_ERROR).PHP_EOL);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
-import { SidebarTrigger } from '@/components/ui/sidebar';
+import { SidebarTrigger } from '@/shared/ui/sidebar';
 import { useAccessStore } from '@/modules/identity-access/public/access';
 import type { BreadcrumbItem } from '@/types';
 

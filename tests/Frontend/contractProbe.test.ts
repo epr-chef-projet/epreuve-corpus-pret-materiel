@@ -5,7 +5,10 @@ import type {
     EquipmentPage,
     EquipmentQuery,
 } from '@/types/generated/types/App/Modules/Catalog/PublicApi';
-import type { OperationResultData } from '@/types/generated/types/App/Infrastructure/Operations';
+import type {
+    ClosedOperationResultData,
+    OperationResultData,
+} from '@/types/generated/types/App/Infrastructure/Operations';
 import { expect, expectTypeOf, it } from 'vitest';
 import serialized from './generated/sample.json';
 import identity from './generated/identity.json';
@@ -121,6 +124,7 @@ it('matches real Catalog and Operations JSON with generated immutable contracts'
         page: EquipmentPage;
         query: EquipmentQuery;
         operation: OperationResultData;
+        closedOperation: ClosedOperationResultData;
         managementPage: ManagementPageData;
     } = {
         equipment: {
@@ -187,6 +191,15 @@ it('matches real Catalog and Operations JSON with generated immutable contracts'
                 replayed: false,
             },
         },
+        closedOperation: {
+            status: 'closed',
+            receipt: null,
+            closure: {
+                operationKey: '019a23d0-0000-7000-8000-000000000003',
+                operationType: 'catalog.equipment.create',
+                closedAt: '2026-10-20T15:30:00.000Z',
+            },
+        },
     };
     expect(catalog).toEqual(expected);
     expectTypeOf<EquipmentData['status']>().toEqualTypeOf<
@@ -195,4 +208,11 @@ it('matches real Catalog and Operations JSON with generated immutable contracts'
     expectTypeOf<OperationResultData['status']>().toEqualTypeOf<
         'applied' | 'notEstablished'
     >();
+    expectTypeOf<
+        ClosedOperationResultData['status']
+    >().toEqualTypeOf<'closed'>();
+    expectTypeOf<ClosedOperationResultData['receipt']>().toEqualTypeOf<null>();
+    expectTypeOf<
+        ClosedOperationResultData['closure']['operationType']
+    >().toEqualTypeOf<'catalog.equipment.create'>();
 });

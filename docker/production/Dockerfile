@@ -13,10 +13,12 @@ RUN php_upgrades="$(awk -F: '$1 == "P" && $2 ~ /^php-8[.]5($|-)/ && $2 !~ /^php-
       php-8.5-pdo_pgsql=8.5.12-r0 php-8.5-posix=8.5.12-r0 php-8.5-zip=8.5.12-r0 \
       php-8.5-dom=8.5.12-r0 php-8.5-xml=8.5.12-r0 php-8.5-xmlwriter=8.5.12-r0 \
       php-8.5-simplexml=8.5.12-r0 php-8.5-redis=6.3.0-r6 php-8.5-imagick=3.8.1-r8 \
-      imagemagick-7=7.1.2.33-r0 ttf-dejavu=2.37-r9 \
-      nginx-mainline=1.31.6-r3 nginx-mainline-config=1.31.6-r3 \
-      nginx-mainline-fastcgi-params=1.31.6-r3 nginx-mainline-mime-types=1.31.6-r3 \
-      nginx-mainline-scgi-params=1.31.6-r3 nginx-mainline-uwsgi-params=1.31.6-r3 \
+      imagemagick-7=7.1.2.33-r0 tiff=4.7.2-r5 ttf-dejavu=2.37-r9 \
+      nginx-mainline=1.31.8-r1 nginx-mainline-config=1.31.8-r1 \
+      nginx-mainline-fastcgi-params=1.31.8-r1 nginx-mainline-mime-types=1.31.8-r1 \
+      nginx-mainline-scgi-params=1.31.8-r1 nginx-mainline-uwsgi-params=1.31.8-r1 \
+      brotli=1.2.1-r2 brotli-dev=1.2.1-r2 libbrotlicommon1=1.2.1-r2 \
+      libbrotlidec1=1.2.1-r2 libbrotlienc1=1.2.1-r2 \
       busybox=1.38.0-r3 curl=8.23.0-r1 libcurl-openssl4=8.23.0-r1 \
       ca-certificates=20260909-r3 ca-certificates-bundle=20260909-r3 \
     && ldconfig -r /base-root \
@@ -80,6 +82,7 @@ COPY --from=dependencies /var/www/html/scripts/epr-probe.php scripts/epr-probe.p
 COPY --from=dependencies /var/www/html/resources/views/ resources/views/
 COPY --from=frontend /var/www/html/public/ public/
 COPY docker/production/InstrumentSans-OFL.txt /usr/share/licenses/instrument-sans/OFL.txt
+COPY docker/production/Lucide-LICENSE.txt /usr/share/licenses/lucide/LICENSE.txt
 COPY docker/production/entrypoint.sh /usr/local/bin/epr-image
 RUN mkdir -p bootstrap/cache storage/app/private storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs \
     && chown -R 10001:10001 bootstrap/cache storage \

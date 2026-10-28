@@ -298,3 +298,111 @@ it('keeps pending logout in memory without writing browser storage', async () =>
     expect(storage).not.toHaveBeenCalled();
     expect(fixture.access.status).toBe('signingOut');
 });
+
+it('resets logout flags before reusing the same store in a new lifecycle', async () => {
+    const authenticated = {
+        ...guest,
+        user: {
+            id: '019a0000-0000-7000-8000-000000000001',
+            login: 'synthetic',
+            displayName: 'Synthetic',
+            workshopId: '019a0000-0000-7000-8000-000000000002',
+            workshopName: 'Synthetic',
+            role: 'manager',
+        },
+        broadcastToken: 'a'.repeat(64),
+        authGeneration: 1,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+    } as const;
+    const fixture = setup();
+    await flushPromises();
+    fixture.access.accept(authenticated);
+    const generation = fixture.access.generation;
+    const cleanup = vi.fn();
+    fixture.access.own(cleanup);
+    const response = http
+        .getClient()
+        .request({ url: '/delayed', method: 'get' });
+    const observed =
+        expect(response).rejects.toBeInstanceOf(HttpCancelledError);
+    const oldResponse = {
+        data: 'old private response',
+        status: 200,
+        headers: {},
+    };
+    fixture.access.setLogoutPending(true);
+    fixture.access.logoutSubmitting = true;
+
+    try {
+        dispose();
+        dispose = () => {};
+        expect(useAccessStore()).toBe(fixture.access);
+        expect(fixture.access.logoutPending).toBe(false);
+        expect(fixture.access.logoutSubmitting).toBe(false);
+        expect(fixture.access.context).toBeNull();
+        expect(fixture.access.blockedToken).toBeNull();
+        expect(fixture.access.status).toBe('checking');
+        expect(fixture.access.confirming).toBe(true);
+        expect(fixture.access.stale).toBe(true);
+        expect(fixture.access.transport).toBe('disconnected');
+        expect(fixture.access.generation).toBeGreaterThan(generation);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+
+        const request = vi.fn(() =>
+            Promise.resolve({
+                data: JSON.stringify(authenticated),
+                status: 200,
+                headers: {},
+            }),
+        );
+        http.setClient({ request });
+        const presentation = createPresentation(commonMessages);
+        const lifecycle = installAccessLifecycle(presentation);
+        dispose = () => {
+            lifecycle.dispose();
+            presentation.dispose();
+        };
+        await flushPromises();
+        expect(useAccessStore()).toBe(fixture.access);
+        expect(fixture.access.status).toBe('active');
+        expect(fixture.access.context).toEqual(authenticated);
+        expect(request).toHaveBeenCalledTimes(1);
+
+        fixture.resolve(oldResponse);
+        await observed;
+        expect(fixture.access.status).toBe('active');
+        expect(fixture.access.context).toEqual(authenticated);
+        expect(fixture.access.generation).toBeGreaterThan(generation);
+        const post = vi.spyOn(router, 'post').mockImplementation(() => {});
+        lifecycle.signOut();
+        expect(post).toHaveBeenCalledTimes(1);
+        expect(fixture.access.logoutPending).toBe(true);
+        expect(fixture.access.logoutSubmitting).toBe(true);
+    } finally {
+        fixture.resolve(oldResponse);
+        await observed;
+    }
+});
+
+it('preserves both logout flags during ordinary invalidation', () => {
+    const access = useAccessStore();
+    const generation = access.generation;
+    const cleanup = vi.fn();
+    access.own(cleanup);
+    access.setLogoutPending(true);
+    access.logoutSubmitting = true;
+
+    access.invalidate();
+    expect(access.logoutPending).toBe(true);
+    expect(access.logoutSubmitting).toBe(true);
+    expect(access.generation).toBeGreaterThan(generation);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+
+    const nextGeneration = access.generation;
+    access.invalidate(true);
+    expect(access.logoutPending).toBe(true);
+    expect(access.logoutSubmitting).toBe(true);
+    expect(access.status).toBe('signingOut');
+    expect(access.generation).toBeGreaterThan(nextGeneration);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+});

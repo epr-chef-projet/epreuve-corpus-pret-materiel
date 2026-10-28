@@ -9,9 +9,13 @@ final class ReadOperationResult
 {
     public function __construct(private OperationRepository $operations) {}
 
-    public function handle(OperationScope $scope): OperationResultData
+    public function handle(OperationScope $scope): OperationResultData|ClosedOperationResultData
     {
         $receipt = $this->operations->read($scope);
+
+        if ($receipt instanceof OperationClosureData) {
+            return new ClosedOperationResultData($receipt);
+        }
 
         return new OperationResultData($receipt === null ? 'notEstablished' : 'applied', $receipt);
     }

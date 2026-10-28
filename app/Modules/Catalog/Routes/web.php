@@ -12,6 +12,7 @@ Route::middleware(['web', 'auth', 'can:manage-catalog'])->prefix('gestion/materi
     Route::get('/', [CatalogController::class, 'index'])->name('manageCatalog');
     Route::get('/nouveau', [CatalogController::class, 'create'])->name('catalog.create');
     Route::post('/', [CatalogController::class, 'store'])->name('catalog.store');
+    Route::post('/operations/cloture', [CatalogController::class, 'closeOperation'])->middleware('throttle:catalog.operation.close')->name('catalog.operation.close');
     Route::middleware(ReadOnlySession::class)->withoutMiddleware([StartSession::class, AddQueuedCookiesToResponse::class])->group(function (): void {
         Route::get('/lectures', [CatalogController::class, 'page'])->name('catalog.page');
         Route::get('/operations', [CatalogController::class, 'operation'])->name('catalog.operation');

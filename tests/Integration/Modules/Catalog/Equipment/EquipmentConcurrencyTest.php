@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Tests\Feature\Modules\Catalog\Equipment;
+namespace Tests\Integration\Modules\Catalog\Equipment;
 
+use App\Infrastructure\Operations\IntentClosed;
 use App\Modules\Catalog\Equipment\UseCases\ChangeEquipmentState\ChangeEquipmentStateAction;
 use App\Modules\Catalog\Equipment\UseCases\CreateEquipment\CreateEquipmentAction;
 use App\Modules\Catalog\Equipment\UseCases\InvalidateCatalog\PublishCatalogInvalidation;
@@ -12,6 +13,7 @@ use App\Modules\Catalog\PublicApi\LockEquipmentBatch;
 use App\Modules\Catalog\PublicApi\ReplaceTotalWithinUnit;
 use App\Modules\IdentityAccess\PublicApi\ActorContext;
 use App\Modules\IdentityAccess\PublicApi\SqlUnit;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
@@ -93,6 +95,9 @@ final class EquipmentConcurrencyTest extends TestCase
         if (! mkdir($directory, 0700, true) && ! is_dir($directory)) {
             throw new \RuntimeException('Could not prepare race barriers.');
         }
+        $nativeNotifications = in_array('close', [$first['action'], $second['action']], true);
+        $first = [...$first, 'nativeNotifications' => $nativeNotifications];
+        $second = [...$second, 'nativeNotifications' => $nativeNotifications];
         $a = $this->child([...$first, 'directory' => $directory, 'worker' => 'a', 'pause' => $pause]);
         $this->waitFor(static fn (): bool => is_file($directory.'/held') || ! $a->isRunning());
         $this->assertTrue($a->isRunning(), $a->getErrorOutput().$a->getOutput());
@@ -138,6 +143,155 @@ final class EquipmentConcurrencyTest extends TestCase
         app(SqlUnit::class)->forActorRead($this->actor(), function () use ($key, $a): void {
             $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $key)->count());
             $this->assertDatabaseHas('catalog_equipment', ['id' => $a['receipt']['resourceId'], 'name' => '__a03_race_first']);
+        });
+    }
+
+    public function test_a_creation_committed_before_resolution_returns_its_original_receipt_without_another_effect(): void
+    {
+        $key = $this->key();
+        $name = '__af02_create_first_'.Str::uuid7();
+
+        [$created, $resolved] = $this->race(['action' => 'create', 'operationKey' => $key, 'name' => $name], ['action' => 'close', 'operationKey' => $key], 'intention');
+
+        $this->assertSame('applied', $resolved['result']['status']);
+        $this->assertSame($created['receipt']['resourceId'], $resolved['result']['receipt']['resourceId']);
+        $this->assertSame($created['receipt']['recordedAt'], $resolved['result']['receipt']['recordedAt']);
+        $this->assertTrue($resolved['result']['receipt']['replayed']);
+        $this->assertSame(1, $created['notifications']);
+        $this->assertSame(0, $resolved['notifications']);
+        $this->assertAppliedOutcome($key, $created['receipt']['resourceId'], $name);
+    }
+
+    public function test_a_committed_closure_refuses_a_waiting_creation_and_a_later_changed_body(): void
+    {
+        Queue::fake([PublishCatalogInvalidation::class]);
+        $key = $this->key();
+        $name = '__af02_close_first_'.Str::uuid7();
+
+        [$closed, $created] = $this->race(['action' => 'close', 'operationKey' => $key], ['action' => 'create', 'operationKey' => $key, 'name' => $name], 'intention');
+
+        $this->assertSame('closed', $closed['result']['status']);
+        $this->assertNull($closed['result']['receipt']);
+        $this->assertSame($key, $closed['result']['closure']['operationKey']);
+        $this->assertSame(CreateEquipmentAction::OPERATION, $closed['result']['closure']['operationType']);
+        $this->assertSame('operations.intent_closed', $created['errorCode']);
+        $this->assertSame(IntentClosed::class, $created['errorClass']);
+        $this->assertSame(0, $closed['notifications']);
+        $this->assertSame(0, $created['notifications']);
+        expect(fn () => app(CreateEquipmentAction::class)->handle($this->actor(), new EquipmentInput($name.'_changed', 'Changed late body', null), 2, $key))->toThrow(IntentClosed::class);
+        $this->assertClosedOutcome($key);
+        app(SqlUnit::class)->forActorRead($this->actor(), function () use ($name): void {
+            $this->assertDatabaseMissing('catalog_equipment', ['name' => $name]);
+            $this->assertDatabaseMissing('catalog_equipment', ['name' => $name.'_changed']);
+        });
+        Queue::assertNotPushed(PublishCatalogInvalidation::class);
+    }
+
+    public function test_two_simultaneous_closures_keep_the_same_terminal_proof_without_publishing(): void
+    {
+        $key = $this->key();
+        $input = ['action' => 'close', 'operationKey' => $key];
+
+        [$first, $second] = $this->race($input, $input, 'intention');
+
+        $this->assertSame('closed', $first['result']['status']);
+        $this->assertSame($first['result'], $second['result']);
+        $this->assertSame(0, $first['notifications']);
+        $this->assertSame(0, $second['notifications']);
+        $this->assertClosedOutcome($key);
+    }
+
+    public function test_a_creation_rolled_back_after_its_receipt_allows_the_waiting_closure_to_commit(): void
+    {
+        $key = $this->key();
+        $name = '__af02_create_rollback_'.Str::uuid7();
+
+        [$rolledBack, $closed] = $this->race(['action' => 'create', 'operationKey' => $key, 'name' => $name, 'rollback' => true], ['action' => 'close', 'operationKey' => $key], 'decision');
+
+        $this->assertTrue($rolledBack['rolledBack']);
+        $this->assertSame('closed', $closed['result']['status']);
+        $this->assertSame(0, $rolledBack['notifications']);
+        $this->assertSame(0, $closed['notifications']);
+        $this->assertClosedOutcome($key);
+        app(SqlUnit::class)->forActorRead($this->actor(), function () use ($name): void {
+            $this->assertDatabaseMissing('catalog_equipment', ['name' => $name]);
+        });
+    }
+
+    public function test_a_closure_rolled_back_after_insertion_allows_the_waiting_creation_to_commit(): void
+    {
+        $key = $this->key();
+        $name = '__af02_close_rollback_'.Str::uuid7();
+
+        [$rolledBack, $created] = $this->race(['action' => 'close', 'operationKey' => $key, 'rollback' => true], ['action' => 'create', 'operationKey' => $key, 'name' => $name], 'decision');
+
+        $this->assertTrue($rolledBack['rolledBack']);
+        $this->assertSame(0, $rolledBack['notifications']);
+        $this->assertSame(1, $created['notifications']);
+        $this->assertAppliedOutcome($key, $created['receipt']['resourceId'], $name);
+    }
+
+    public function test_operation_storage_rejects_partial_successes_and_closures_with_fictitious_results(): void
+    {
+        Queue::fake([PublishCatalogInvalidation::class]);
+        $actor = $this->actor();
+        $created = app(CreateEquipmentAction::class)->handle($actor, new EquipmentInput('__af02_constraints_'.Str::uuid7(), 'AF02 constraint fixture', null), 1, $this->key());
+        $applied = ['status' => 'applied', 'operation_type' => CreateEquipmentAction::OPERATION, 'input_sha256' => str_repeat('a', 64), 'resource_type' => 'equipment', 'resource_id' => $created->resourceId, 'equipment_id' => $created->resourceId, 'result_version' => 1];
+        $closed = ['status' => 'closed', 'operation_type' => CreateEquipmentAction::OPERATION, 'input_sha256' => null, 'resource_type' => null, 'resource_id' => null, 'equipment_id' => null, 'result_version' => null];
+        $cases = [
+            'unknown status' => [[...$applied, 'status' => 'pending'], '23514', 'operation_receipts_outcome_check'],
+            'null status' => [[...$applied, 'status' => null], '23502', '"status"'],
+            'invalid hash' => [[...$applied, 'input_sha256' => 'not-a-canonical-hash'], '23514', 'operation_receipts_hash_check'],
+            'invalid version' => [[...$applied, 'result_version' => 0], '23514', 'operation_receipts_version_check'],
+            'invalid resource type' => [[...$applied, 'resource_type' => 'loanRequest'], '23514', 'operation_receipts_resource_check'],
+            'divergent resource id' => [[...$applied, 'resource_id' => (string) Str::uuid7()], '23514', 'operation_receipts_resource_check'],
+        ];
+        foreach (['input_sha256', 'resource_type', 'resource_id', 'equipment_id', 'result_version'] as $column) {
+            $cases['partial success '.$column] = [[...$applied, $column => null], '23514', 'operation_receipts_outcome_check'];
+            $cases['fictitious closed result '.$column] = [[...$closed, $column => $applied[$column]], '23514', 'operation_receipts_outcome_check'];
+        }
+        foreach (['catalog.equipment.update_text', 'catalog.equipment.archive', 'catalog.equipment.reactivate'] as $operationType) {
+            $cases['closed other family '.$operationType] = [[...$closed, 'operation_type' => $operationType], '23514', 'operation_receipts_outcome_check'];
+        }
+
+        foreach ($cases as $label => [$outcome, $sqlState, $constraint]) {
+            $key = $this->key();
+            try {
+                app(SqlUnit::class)->forActor($actor, static function () use ($actor, $key, $outcome): void {
+                    DB::table('operation_receipts')->insert([
+                        ...$outcome, 'id' => (string) Str::uuid7(), 'workshop_id' => $actor->workshopId, 'actor_id' => $actor->actorId,
+                        'operation_key' => $key, 'recorded_at' => now(),
+                    ]);
+                });
+                $this->fail('Invalid operation outcome was accepted: '.$label);
+            } catch (QueryException $error) {
+                $this->assertSame($sqlState, $error->errorInfo[0] ?? null, $label);
+                $this->assertStringContainsString($constraint, $error->errorInfo[2] ?? '', $label);
+            }
+            app(SqlUnit::class)->forActorRead($actor, function () use ($key): void {
+                $this->assertDatabaseMissing('operation_receipts', ['operation_key' => $key]);
+            });
+        }
+        Queue::assertPushed(PublishCatalogInvalidation::class, 1);
+    }
+
+    private function assertClosedOutcome(string $key): void
+    {
+        app(SqlUnit::class)->forActorRead($this->actor(), function () use ($key): void {
+            $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $key)->count());
+            $this->assertDatabaseHas('operation_receipts', [
+                'operation_key' => $key, 'status' => 'closed', 'operation_type' => CreateEquipmentAction::OPERATION,
+                'input_sha256' => null, 'resource_type' => null, 'resource_id' => null, 'equipment_id' => null, 'result_version' => null,
+            ]);
+        });
+    }
+
+    private function assertAppliedOutcome(string $key, string $resourceId, string $name): void
+    {
+        app(SqlUnit::class)->forActorRead($this->actor(), function () use ($key, $resourceId, $name): void {
+            $this->assertSame(1, DB::table('operation_receipts')->where('operation_key', $key)->count());
+            $this->assertDatabaseHas('operation_receipts', ['operation_key' => $key, 'status' => 'applied', 'resource_id' => $resourceId, 'equipment_id' => $resourceId, 'result_version' => 1]);
+            $this->assertDatabaseHas('catalog_equipment', ['id' => $resourceId, 'name' => $name, 'version' => 1, 'total_quantity' => 1]);
         });
     }
 

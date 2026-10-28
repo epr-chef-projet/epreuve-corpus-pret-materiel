@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
 import { toRef } from 'vue';
-import { Spinner } from '@/components/ui/spinner';
+import { Spinner } from '@/shared/ui/spinner';
 import { useActivityIndicator } from '@/composables/useActivityIndicator';
 
 const props = defineProps<{ verifying: boolean }>();

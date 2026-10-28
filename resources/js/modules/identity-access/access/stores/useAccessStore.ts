@@ -86,6 +86,8 @@ export const useAccessStore = defineStore('identity-access.context', () => {
     function $reset() {
         invalidate();
         blockedToken.value = null;
+        logoutPending.value = false;
+        logoutSubmitting.value = false;
     }
     return {
         context,

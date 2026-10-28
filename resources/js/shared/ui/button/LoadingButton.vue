@@ -3,7 +3,7 @@ import type { HTMLAttributes } from 'vue';
 import { toRef } from 'vue';
 import type { ButtonVariants } from '.';
 import { useActivityIndicator } from '@/composables/useActivityIndicator';
-import { Spinner } from '@/components/ui/spinner';
+import { Spinner } from '@/shared/ui/spinner';
 import { cn } from '@/lib/utils';
 import Button from './Button.vue';
 

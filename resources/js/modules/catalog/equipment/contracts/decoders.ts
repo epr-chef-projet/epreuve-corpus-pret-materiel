@@ -5,6 +5,8 @@ import type {
 import type { EquipmentData } from '@/types/generated/types/App/Modules/Catalog/PublicApi';
 import type {
     CommandReceipt,
+    ClosedOperationResultData,
+    OperationClosureData,
     OperationResultData,
 } from '@/types/generated/types/App/Infrastructure/Operations';
 
@@ -94,12 +96,27 @@ export function isReceipt(value: unknown): value is CommandReceipt {
 }
 export function isOperationResult(
     value: unknown,
-): value is OperationResultData {
+): value is OperationResultData | ClosedOperationResultData {
     return (
         record(value) &&
-        Object.keys(value).length === 2 &&
-        ((value.status === 'notEstablished' && value.receipt === null) ||
-            (value.status === 'applied' && isReceipt(value.receipt)))
+        ((Object.keys(value).length === 2 &&
+            ((value.status === 'notEstablished' && value.receipt === null) ||
+                (value.status === 'applied' && isReceipt(value.receipt)))) ||
+            (Object.keys(value).length === 3 &&
+                value.status === 'closed' &&
+                value.receipt === null &&
+                isOperationClosure(value.closure)))
+    );
+}
+export function isOperationClosure(
+    value: unknown,
+): value is OperationClosureData {
+    return (
+        record(value) &&
+        Object.keys(value).length === 3 &&
+        uuid(value.operationKey) &&
+        value.operationType === 'catalog.equipment.create' &&
+        instant(value.closedAt)
     );
 }
 export function isCatalogInvalidation(payload: unknown): boolean {

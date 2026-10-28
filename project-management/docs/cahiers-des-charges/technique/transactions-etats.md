@@ -1,6 +1,8 @@
 # Transactions, états et répétitions
 
-**Version 1.2 - spécification technique.** [Index technique](README.md). Références produit : [engagements](../fonctionnel/catalogue-et-disponibilite.md), [transitions et historique](../fonctionnel/demandes-et-prets.md), [conflits et résultat incertain](../fonctionnel/cadre-et-acces.md#synchronisation). Le [schéma](donnees-securite.md) et les [contrats](../../interne/architecture/contrats-et-lots.md) possèdent leurs détails.
+**Version 1.3 - spécification technique.** [Index technique](README.md). Références produit : [engagements](../fonctionnel/catalogue-et-disponibilite.md), [transitions et historique](../fonctionnel/demandes-et-prets.md), [conflits et résultat incertain](../fonctionnel/cadre-et-acces.md#synchronisation). Le [schéma](donnees-securite.md) et les [contrats](../../interne/architecture/contrats-et-lots.md) possèdent leurs détails.
+
+La clôture explicite d'une création Catalogue incertaine dispose d'une entrée HTTP et d'une migration d'évolution. Chaque installation doit recevoir cette migration et le code compatible ; la présence de cette spécification ne prouve pas leur application sur un poste ou serveur.
 
 <a id="epr-t-030"></a>
 
@@ -66,6 +68,14 @@ La portée est atelier, acteur, type de commande et `operationKey` UUID. Une emp
 
 Même clé/contenu : restituer la preuve acquise après droits courants, sans refaire l'effet ni exiger que l'état actuel égale l'ancien résultat. Même clé/contenu différent : conflit. Un refus annulant l'unité ne conserve pas une réussite. La relecture après conflit utilise un nouvel instantané d'instruction sur le primaire ; une preuve absente/incomplète impose rapprochement, jamais mutation aveugle. Aucune expiration automatique : preuves conservées jusqu'à remise à zéro explicite. Une suppression de brouillon conserve la preuve nécessaire à ses répétitions tardives.
 
+Pour `catalog.equipment.create`, lorsque le contenu d'un envoi incertain a été perdu, le responsable courant peut demander explicitement sa résolution. Cette commande ne reconstruit pas le contenu et ne crée pas de matériel. Dans une unité inscriptible `READ COMMITTED`, elle prend le même verrou d'intention que la création, puis relit l'issue sur le primaire dans une instruction distincte. Si un reçu existe, elle rend le succès initial sans l'annuler. Si la clôture existe, elle la rend. Sinon elle enregistre une clôture immuable, confirmée seulement après commit. Une seule issue terminale, `applied` ou `closed`, occupe cette portée.
+
+Toute création tardive ou tentative de reprise contrôle la clôture avant comparaison d'empreinte et avant insertion. Une clé clôturée ne peut plus produire de matériel ; elle est refusée selon le [contrat d'erreur](../../interne/architecture/contrats-et-lots.md#resolution-creation). La clôture ne produit ni version Equipment, ni invalidation Catalogue, ni faux reçu de succès. Les autres familles conservent leur protocole actuel.
+
+Un timeout, une erreur, `notEstablished` ou une réponse perdue ne prouve pas que la clé est clôturée. La vérification autorisée peut retrouver le succès ou la clôture après perte de réponse ; seule une preuve terminale valide autorise le retrait de la preuve navigateur. Après clôture confirmée, un nouveau clic explicite peut créer une nouvelle intention ; une réponse réseau ne la soumet jamais automatiquement. La clôture serveur reste conservée sans TTL afin de refuser un ancien appel tardif.
+
+Les formes de résultat et les protections HTTP appartiennent aux [contrats](../../interne/architecture/contrats-et-lots.md#resolution-creation) ; la présentation contextuelle et la conservation d'une nouvelle saisie relèvent d'[EPR-T-063](frontend-temps-reel.md). La résolution explicite ne constitue pas une autorisation de suppression d'un matériel ou d'une donnée métier.
+
 <a id="epr-t-038"></a>
 
 ## EPR-T-038 - Échec, limites et suites
@@ -81,3 +91,5 @@ Ne pas rejouer automatiquement conflit métier/version, attente expirée ou comm
 Exercer PostgreSQL avec deux connexions indépendantes, rôle applicatif et contextes réels. Des barrières observables et délais bornés contrôlent les deux ordres des courses : dernière unité, réduction du total/confirmation, archivage/confirmation, modification/acceptation, annulation/remise. Vérifier persistance, absence d'effet partiel et issue présentée.
 
 Ajouter rollback après première écriture, mauvaise connexion/contexte, version périmée, double clé simultanée, contenu divergent, nouvelle intention, suppression de brouillon répétée, commit/réponse perdue et crash avant relais. Le succès d'une transaction interne suivi d'un rollback extérieur ne publie rien. Ni SQLite, rôle contournant RLS, mock ou transaction englobante du test ne prouve ces garanties. Les [profils de qualification](qualification.md) relient ces preuves aux EPR-S.
+
+Pour la clôture de création, exercer les deux ordres création/clôture, le rollback du premier détenteur, deux clôtures simultanées, l'appel initial tardif et la réponse de clôture perdue puis relue. Constater une seule issue persistée et aucun effet de création après clôture. Compléter par création non reçue, rechargement et perte du contenu dans le navigateur, avec action de résolution et nouvelle saisie explicite. Les régressions appartiennent aux suites Catalogue PHP, frontend et Browser existantes.

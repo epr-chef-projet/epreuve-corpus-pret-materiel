@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
-import PasswordFocusFixture from './fixtures/PasswordFocusFixture.vue';
+import PasswordFocusFixture from '../../../tests/Frontend/fixtures/PasswordFocusFixture.vue';
 import { focus } from '@/shared/directives/focus';
 import { createI18n } from 'vue-i18n';
 import { commonMessages } from '@/shared/i18n/messages';

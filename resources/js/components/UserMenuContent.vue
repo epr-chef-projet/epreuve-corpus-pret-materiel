@@ -6,7 +6,7 @@ import {
     DropdownMenuItem,
     DropdownMenuLabel,
     DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
+} from '@/shared/ui/dropdown-menu';
 import UserInfo from '@/components/UserInfo.vue';
 import { accessLifecycleKey } from '@/modules/identity-access/public/access';
 import type { User } from '@/types';

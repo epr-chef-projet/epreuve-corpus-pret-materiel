@@ -228,6 +228,13 @@ export function useEquipmentForm(
     function absent(key: string) {
         if (intention.value?.key === key) resumable.value = true;
     }
+    function closed(key: string) {
+        if (!current() || equipment.value || intention.value?.key !== key)
+            return;
+        intention.value = null;
+        resumable.value = false;
+        saved.value = false;
+    }
     function applied(key: string, receipt?: CommandReceipt) {
         if (intention.value?.key === key) {
             if (isReceipt(receipt) && receipt.operationKey === key) {
@@ -286,9 +293,22 @@ export function useEquipmentForm(
         submit,
         resume,
         absent,
+        closed,
         applied,
         loadCurrent,
         pendingForTarget,
+        resolvableCreationKeys: computed(() =>
+            equipment.value
+                ? []
+                : pending.unresolved.value
+                      .filter(
+                          (proof) =>
+                              proof.operationType ===
+                                  'catalog.equipment.create' &&
+                              proof.operationKey !== intention.value?.key,
+                      )
+                      .map((proof) => proof.operationKey),
+        ),
         waiting: computed(() => intention.value !== null),
     };
 }

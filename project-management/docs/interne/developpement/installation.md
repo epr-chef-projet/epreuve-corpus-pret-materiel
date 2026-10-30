@@ -1,6 +1,6 @@
 # Installation et utilisation de la base
 
-**Version 0.14.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
+**Version 0.15.** Cette procédure possède l'installation d'un clone et le cycle de développement. L'[environnement](environnement.md) possède les paramètres ; la [qualité](qualite-et-recette.md) possède les responsabilités des contrôles et leurs critères.
 
 Le projet comprend Laravel, Fortify, Inertia, Vue et les écrans d'authentification, avec les services retenus. Un clone reçoit les sources et leurs locks, sans nouvelle acquisition du kit. Les fonctionnalités et leurs contrats relèvent des [spécifications](../../cahiers-des-charges/fonctionnel/README.md) et des [contrats de modules](../architecture/contrats-et-lots.md).
 
@@ -52,11 +52,14 @@ docker compose run --rm --no-deps --pull never --user "$(id -u):$(id -g)" --entr
 docker compose -f compose.yaml -f compose.bootstrap.yaml up -d --wait --wait-timeout 90 --no-build --pull never laravel.test pgsql redis mailpit
 ./vendor/bin/sail composer dump-autoload --no-scripts --no-interaction
 ./vendor/bin/sail npm ci --ignore-scripts --engine-strict
+./vendor/bin/sail node scripts/prepare-i18n-types.mjs
 ./vendor/bin/sail composer check-platform-reqs
 ./vendor/bin/sail artisan package:discover --no-interaction
 ```
 
 Attendus : runtime de `docker/8.5/Dockerfile`, dépendances des deux locks, plugin Pest autorisé, autoload et découverte Laravel disponibles. La surcharge `compose.bootstrap.yaml` maintient temporairement le service applicatif sans HTTP ; elle utilise les mêmes conteneurs, réseau et volumes que l’installation courante. Les hooks Composer sont différés jusqu’à disponibilité du contexte ; la découverte nommée est reprise explicitement, sans rejouer les installateurs du kit.
+
+La préparation `scripts/prepare-i18n-types.mjs` adapte seulement deux déclarations de types de vue-i18n 11.4.16 au runtime Vue 3.5.43 verrouillé, sans modifier son JavaScript. Elle traite le [défaut de déclaration amont](https://github.com/intlify/vue-i18n/issues/2335) et conserve la signature d'instance réellement fournie par cette version de Vue, sans faux export ni désactivation du typage strict. Le script exige les versions et les empreintes reçues, refuse toute dérive et reste idempotent ; `--check` vérifie le résultat sans écriture. Toute évolution des versions demande de revoir ou de retirer cette compatibilité. Les commandes `npm run check:types` et `npm run types:check` reprennent explicitement cette préparation avant les deux compilateurs, avec `skipLibCheck=false`.
 
 Préparer ensuite les bases par la procédure de migration ci-dessous, puis générer et compiler :
 
@@ -345,6 +348,7 @@ docker compose -f compose.yaml -f compose.bootstrap.yaml up -d --wait --wait-tim
 ./vendor/bin/sail composer install --no-scripts --no-plugins --no-interaction
 ./vendor/bin/sail composer dump-autoload --no-scripts --no-interaction
 ./vendor/bin/sail npm ci --ignore-scripts --engine-strict
+./vendor/bin/sail node scripts/prepare-i18n-types.mjs
 ./vendor/bin/sail composer check-platform-reqs
 ./vendor/bin/sail artisan package:discover --no-interaction
 ```
